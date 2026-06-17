@@ -32,15 +32,6 @@ use serde_json::{json, Value};
 
 use crate::baseline::{Baseline, USER_ID};
 
-/// Memory-tool names served by the harness itself (real, query the seed user).
-/// We must NOT also register fakes for these, or the model sees duplicates.
-const MEMORY_TOOL_NAMES: &[&str] = &[
-    "search_memories",
-    "fetch_memories",
-    "search_subjects",
-    "search_memories_in_subjects",
-];
-
 /// Production default chat model (Go: `openrouter_name` fallback). Override with
 /// `DITTOBENCH_MODEL`.
 pub const PROD_DEFAULT_MODEL: &str = "google/gemini-3.1-flash-lite";
@@ -223,7 +214,7 @@ pub async fn playground_turn(
     // Fake action tools = full catalog minus the real memory tools.
     let host_tools: Vec<Arc<dyn Tool>> = crate::catalog::catalog()
         .into_iter()
-        .filter(|d| !MEMORY_TOOL_NAMES.contains(&d.name.as_str()))
+        .filter(|d| !crate::baseline::MEMORY_TOOL_NAMES.contains(&d.name.as_str()))
         .map(|d| {
             Arc::new(FakeTool {
                 def: ToolDefinition {
@@ -440,7 +431,7 @@ async fn tools_handler() -> impl IntoResponse {
     let tools: Vec<Value> = crate::catalog::catalog()
         .into_iter()
         .map(|d| {
-            let memory = MEMORY_TOOL_NAMES.contains(&d.name.as_str());
+            let memory = crate::baseline::MEMORY_TOOL_NAMES.contains(&d.name.as_str());
             json!({
                 "name": d.name,
                 "description": d.description,

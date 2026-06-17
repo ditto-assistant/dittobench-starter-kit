@@ -61,9 +61,17 @@ memories.
 
 ```bash
 cargo run -- mem-eval --k 10     # retrieval recall@k over the seed user (no LLM, free)
-cargo run -- practice --n 20     # tool-calling + speed score on a generated dataset
+cargo run -- evaluate            # FIXED local submission test: static user + same questions, every run
+cargo run -- practice --n 20     # ROTATING random dataset (anti-overfit), like the hosted validator
 cargo run -- serve --port 8080   # expose POST /run + GET /health for the validator
 ```
+
+> **Local practice vs. the hosted validator.** Use **`evaluate`** to iterate: it
+> scores you against a *fixed* benchmark (static seed user + the same bundled
+> LongMemEval questions + a fixed-seed tool set) so your score is comparable
+> run-to-run. The hosted **`dittobench-api`** (coming soon) is the validator that
+> rotates a *fresh* dataset per submission — the anti-overfit target the on-chain
+> SN118 validator uses; `practice` reproduces that rotating behavior locally.
 
 ### `.env` reference
 

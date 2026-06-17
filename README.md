@@ -39,7 +39,7 @@ realistic user out of the box.
 | `src/catalog.rs` | The Ditto tool catalog presented per case. |
 | `src/datagen.rs` | Deterministic-per-seed dataset generator (anti-overfit). |
 | `src/scorer.rs` | Local score report (tool accuracy + memory + latency). |
-| `src/bin/dittobench-miner.rs` | CLI: `serve`, `seed-user`, `mem-eval`, `practice`, `submit`. |
+| `src/bin/dittobench-miner.rs` | CLI: `serve`, `playground`, `seed-user`, `mem-eval`, `evaluate`, `practice`, `submit`. |
 | `fixtures/seed-user/` | The seed user: pairs + pre-synced subjects + subject graph + LongMemEval questions. |
 | `fixtures/models/` | Shipped weights: `mlp-weights.bin` (217K-param MLP) + `cross-encoder.onnx` (TinyBERT-L2 INT8) + BERT vocab. |
 | `scripts/build-seed-user.py` | Regenerates the seed-user slice from the LongMemEval fixture. |
@@ -70,7 +70,8 @@ export OPENROUTER_API_KEY=sk-or-...
 # 4. Load the seed user (one-time; embeds pairs + subjects), then practice.
 cargo run -- seed-user              # load the LongMemEval seed user
 cargo run -- mem-eval --k 10        # retrieval recall over the seed user (no LLM)
-cargo run -- practice --n 20        # tool-calling + speed (needs a chat model)
+cargo run -- evaluate               # FIXED local submission test (static user + same questions)
+cargo run -- practice --n 20        # ROTATING random dataset (anti-overfit, like the hosted validator)
 
 # 5. Serve the harness for the validator.
 cargo run -- serve --port 8080
@@ -97,6 +98,13 @@ and after each turn a live **trace** of the tool calls (args + fake results) and
 the **memories retrieved** for that query. Try _"search the web for…"_ (watch
 `search_web` fire) or _"how many postcards have I collected?"_ (watch memory
 retrieval answer with `ditto://memory/…` citations).
+
+### Local practice vs. the hosted validator
+
+- **`evaluate` (local, fixed):** scores your submission against the **same inputs every run** — the static seed user, the same bundled LongMemEval questions, and a fixed-seed tool set. Inputs are reproducible (the model itself is still stochastic), so it's the loop to **iterate on your score**.
+- **`dittobench-api` (hosted, coming soon):** the validator that rotates a **fresh random dataset per submission** (anti-overfit), mirroring how the on-chain SN118 validator will score you. `practice` reproduces that rotating behavior locally.
+
+Use `evaluate` to develop; treat the rotating score as the real target.
 
 `seed-user` and `mem-eval` need only Ollama (`embeddinggemma`) — no chat model
 or API key — so you can tune retrieval for free. `mem-eval` runs the full

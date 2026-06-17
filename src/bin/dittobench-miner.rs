@@ -59,7 +59,25 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         limit: usize,
     },
-    /// Generate a local dataset, run it through the baseline, and score it.
+    /// Test a submission locally against a FIXED benchmark: the static seed
+    /// user + the same bundled LongMemEval questions + a fixed-seed tool set,
+    /// every run. Reproducible inputs so you can iterate on your score (vs the
+    /// hosted dittobench-api validator, which rotates a fresh dataset). Run
+    /// `seed-user` first.
+    Evaluate {
+        /// Number of (fixed-seed) tool cases.
+        #[arg(long, default_value_t = 12)]
+        tools: usize,
+        /// Number of bundled memory questions to run (0 = all 50).
+        #[arg(long, default_value_t = 12)]
+        mem: usize,
+        /// Fixed dataset seed for the tool cases (change only to vary the fixed set).
+        #[arg(long, default_value_t = 7)]
+        seed: i64,
+    },
+    /// Generate a ROTATING random dataset (anti-overfit), run it through the
+    /// baseline, and score it — mirrors the hosted validator's fresh-dataset
+    /// behavior. For a stable local iteration loop, use `evaluate` instead.
     Practice {
         /// Number of tool cases.
         #[arg(long, default_value_t = 20)]
@@ -85,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Playground { port } => dittobench_starter_kit::playground::serve(port).await,
         Command::SeedUser => seed_user().await,
         Command::MemEval { k, limit } => mem_eval(k, limit).await,
+        Command::Evaluate { tools, mem, seed } => evaluate(tools, mem, seed).await,
         Command::Practice { n, mem, seed } => practice(n, mem, seed).await,
         Command::Submit => submit(),
     }
@@ -214,6 +233,87 @@ async fn mem_eval(k: usize, limit: usize) -> anyhow::Result<()> {
             cnt
         );
     }
+    Ok(())
+}
+
+// --- evaluate (fixed local submission test) ---------------------------------
+
+async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()> {
+    let baseline = Baseline::from_env().await?;
+
+    // Guard: the static seed user must be loaded (memory questions query it).
+    if baseline.retrieve("hello", 1).await.unwrap_or_default().is_empty() {
+        anyhow::bail!("seed user not loaded — run `dittobench-miner seed-user` first");
+    }
+
+    // FIXED inputs: a fixed-seed tool set + the same bundled LongMemEval
+    // questions over the static seed user, every run.
+    let mut ds = datagen::generate(seed, n_tools, 0);
+    let mut cases = dittobench_starter_kit::seed::memory_cases();
+    if n_mem > 0 && cases.len() > n_mem {
+        cases.truncate(n_mem);
+    }
+    ds.memory_cases = cases
+        .iter()
+        .map(|c| protocol::MemoryCase {
+            id: c.question_id.clone(),
+            question: c.query.clone(),
+            expected_answer: c.answer_text(),
+            seed_memories: Vec::new(),
+        })
+        .collect();
+
+    eprintln!(
+        "evaluate (FIXED): {} tool cases (seed={}) + {} bundled LongMemEval questions over the static seed user",
+        ds.tool_cases.len(),
+        seed,
+        ds.memory_cases.len()
+    );
+
+    // Tool cases.
+    let mut tool_resps: HashMap<String, protocol::RunResponse> = HashMap::new();
+    for c in &ds.tool_cases {
+        let req = protocol::RunRequest {
+            case_id: c.id.clone(),
+            system_prompt: "You are Ditto, a helpful assistant. Use a tool when the user's \
+                request clearly needs one; otherwise just answer."
+                .to_string(),
+            user_input: c.prompt.clone(),
+            tools: dittobench_starter_kit::catalog::catalog(),
+        };
+        match baseline.run(req).await {
+            Ok(resp) => {
+                tool_resps.insert(c.id.clone(), resp);
+            }
+            Err(err) => eprintln!("tool case {} failed: {err}", c.id),
+        }
+    }
+
+    // Memory questions (answered by the agent over the seeded user).
+    let mut mem_results: HashMap<String, (bool, i64)> = HashMap::new();
+    for mc in &ds.memory_cases {
+        let req = protocol::RunRequest {
+            case_id: mc.id.clone(),
+            system_prompt: "You are Ditto. Answer using the user's memories when relevant; \
+                search memories if needed."
+                .to_string(),
+            user_input: mc.question.clone(),
+            tools: dittobench_starter_kit::catalog::catalog(),
+        };
+        match baseline.run(req).await {
+            Ok(resp) => {
+                let correct = scorer::answer_matches(&resp.final_text, &mc.expected_answer);
+                mem_results.insert(mc.id.clone(), (correct, resp.latency_ms));
+            }
+            Err(err) => eprintln!("memory case {} failed: {err}", mc.id),
+        }
+    }
+
+    let report = scorer::score(&format!("evaluate-seed{seed}"), &ds, &tool_resps, &mem_results);
+    print_report(&report, &ds);
+    eprintln!(
+        "\n(inputs are fixed; the model is still stochastic, so scores vary slightly run-to-run.\n the hosted dittobench-api validator rotates a fresh dataset per submission.)"
+    );
     Ok(())
 }
 

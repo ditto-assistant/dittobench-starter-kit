@@ -96,6 +96,17 @@ pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
 /// Fixed user id for the single-tenant miner DB.
 pub const USER_ID: &str = "miner";
 
+/// Catalog tools the harness already serves as REAL memory tools when
+/// `include_memory_tools` is true. We must NOT also register stub copies, or
+/// the model sees a duplicate function declaration (strict providers like
+/// Gemini reject that with a 400). The real tools represent these names.
+pub const MEMORY_TOOL_NAMES: &[&str] = &[
+    "search_memories",
+    "fetch_memories",
+    "search_subjects",
+    "search_memories_in_subjects",
+];
+
 /// How the chat model is provisioned.
 #[derive(Debug, Clone)]
 pub enum ModelProvider {
@@ -319,10 +330,13 @@ impl Baseline {
 
         // Expose this case's tool catalog to the model so it can SELECT the
         // right tool (what the validator scores). Built per-run because the
-        // catalog arrives on the wire. EXTENSION POINT: see `WireTool`.
+        // catalog arrives on the wire. Memory tools are dropped here when the
+        // harness serves the real ones (avoids duplicate declarations).
+        // EXTENSION POINT: see `WireTool`.
         let host_tools: Vec<Arc<dyn Tool>> = req
             .tools
             .iter()
+            .filter(|d| !(self.include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str())))
             .map(|d| Arc::new(WireTool::from_wire(d)) as Arc<dyn Tool>)
             .collect();
 
