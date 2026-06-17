@@ -46,6 +46,10 @@ realistic user out of the box.
 
 ## Quickstart
 
+> **New here? Read [`SETUP.md`](SETUP.md)** — the full, step-by-step guide for
+> setting up this kit together with `ditto-harness` (the crate dependency) and
+> `dittobench-api` (the validator), including git auth, Ollama, and `.env`.
+
 ```bash
 # 1. Auth for the private harness dep (your git/ssh must have read access).
 export CARGO_NET_GIT_FETCH_WITH_CLI=true

@@ -10,8 +10,11 @@ name = "dittobench-miner"
 path = "src/bin/dittobench-miner.rs"
 
 [dependencies]
-# The Ditto agent + memory harness (private git dep). Build needs git auth:
+# The Ditto agent + memory harness (private git dep). This rev IS the current
+# ditto-harness `main` HEAD. Build needs git read access to the private repo:
+#   gh auth login && gh auth setup-git   (or any github.com credential helper)
 #   export CARGO_NET_GIT_FETCH_WITH_CLI=true
+# To track a newer harness: bump `rev` to the new main commit, then `cargo update -p ditto-harness`.
 ditto-harness = { git = "https://github.com/ditto-assistant/ditto-harness", rev = "41bb639727ea6ef6b1cbcf701270dee3cf10d871" }
 
 tokio = { version = "1", features = ["full"] }
