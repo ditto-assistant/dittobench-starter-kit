@@ -18,8 +18,8 @@ real ranking models as weights:
 2. **Composite scoring (V2)** — 7 signals (semantic, linear + exponential recency,
    subject frequency, subject semantic match, session continuity, neighbor density)
    fused by weights from a **weight-predictor MLP** (`fixtures/models/mlp-weights.bin`,
-   the production `model.bin`; predicts the fusion weights + scale from the query
-   embedding + 17 aux features).
+   the production architecture retrained on embeddinggemma; predicts the fusion
+   weights + scale from the query embedding + 17 aux features).
 3. **Cross-encoder rerank** — a TinyBERT-L2 cross-encoder
    (`fixtures/models/cross-encoder.onnx`, ONNX via `ort`) reranks the top-20 pool
    and fuses with composite rank via **Reciprocal Rank Fusion** (k=60, ceWeight=0.7).
@@ -143,15 +143,20 @@ Everything you tune lives in **`src/baseline.rs`**, marked `EXTENSION POINT`:
 Run `mem-eval` after retrieval changes (recall@k, no LLM) and `practice` after
 agent/tool changes (watch `composite`, per-category tool means, slowest cases).
 
-### Embedder note (production parity)
+### Embedder note
 
-The shipped MLP was trained on the production embedder (Vertex
-`text-embedding-005`). The kit defaults to local **Ollama `embeddinggemma`** for
-a free, self-contained loop, so the MLP sees a different embedding space — the
-**pipeline shape is 1:1**, but absolute composite numbers won't match production.
-The **cross-encoder rerank is fully faithful** (it scores raw text, independent
-of the embedder). For exact production parity, swap `build_embedder` to
-`text-embedding-005`.
+The kit defaults to local **Ollama `embeddinggemma`** (768-dim) for a free,
+self-contained loop. To make the ranker work in that space, the shipped MLP is
+**retrained on embeddinggemma** (via the production training pipeline, on
+LongMemEval) — so it's calibrated to the kit's default embedder out of the box.
+On the bundled seed user this lifts retrieval from **hit@10 0.90 → 0.96** vs the
+Vertex-trained weights. The **cross-encoder rerank is embedder-independent** (it
+scores raw text), so it's identical to production regardless.
+
+If you switch `build_embedder` to a different embedder, retrain the MLP for that
+space (see `backend/pkg/services/retrieval/training/synthesize_gemma.py`); to run
+the exact production stack, use Vertex `text-embedding-005` + the production
+`model.bin`.
 
 ## Submit
 
