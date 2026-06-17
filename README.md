@@ -181,4 +181,7 @@ your registered hotkey and the subnet `/upload/*` endpoints.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). The `ditto-harness` dependency is also MIT.
+**Dual-licensed** (see [`LICENSING.md`](LICENSING.md)): open source under
+**GNU AGPL-3.0-or-later** ([`LICENSE`](LICENSE)), or a **commercial/partner
+license** from Ditto Assistant for closed-source / proprietary / hosted use
+without AGPL obligations. The `ditto-harness` dependency is licensed the same way.
