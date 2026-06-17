@@ -1,18 +1,23 @@
 # Multi-stage build for the DittoBench miner harness.
 #
-# NOTE ON GIT AUTH: ditto-harness is currently a PRIVATE git dependency. The
-# build needs read access at `cargo build` time. Options:
-#   1. Make ditto-harness public (it is intended to be open source), then this
-#      Dockerfile builds with no extra config.
-#   2. Pass an SSH deploy key via BuildKit secret/ssh and rewrite the dep to
-#      git+ssh, e.g.:
-#         DOCKER_BUILDKIT=1 docker build --ssh default -t dittobench-miner .
-#      (and add `RUN --mount=type=ssh ...` around the cargo build step).
+# NOTE ON GIT AUTH: ditto-harness is currently a PRIVATE git dependency, so the
+# build needs read access at `cargo build` time. This Dockerfile supports a
+# BuildKit `gh_token` secret (a GitHub token with read access). The
+# dittobench-api sandbox passes it automatically; to build by hand:
 #
-# CARGO_NET_GIT_FETCH_WITH_CLI=true makes cargo use the system git (which can
-# use the mounted ssh agent / credentials) instead of its built-in fetcher.
+#     printf '%s' "$(gh auth token)" > /tmp/gh_token
+#     DOCKER_BUILDKIT=1 docker build --secret id=gh_token,src=/tmp/gh_token -t dittobench-miner .
+#
+# Once ditto-harness is public (see ditto-harness#1) the secret becomes a no-op
+# and `docker build -t dittobench-miner .` just works.
+#
+# CARGO_NET_GIT_FETCH_WITH_CLI=true makes cargo use the system git (which honors
+# the credential rewrite below) instead of its built-in fetcher.
 
-FROM rust:1.83-bookworm AS builder
+# rust:1-bookworm tracks the latest stable 1.x — the harness dep tree needs
+# edition2024 (Rust >= 1.85), and the kit doesn't pin a Cargo.lock, so floating
+# to latest stable avoids "feature edition2024 not stabilized" build breaks.
+FROM rust:1-bookworm AS builder
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 WORKDIR /app
 
@@ -21,7 +26,13 @@ COPY Cargo.toml ./
 COPY src ./src
 COPY fixtures ./fixtures
 
-RUN cargo build --release --bin dittobench-miner
+# If a gh_token secret is mounted, use it for github.com over HTTPS; otherwise
+# build assuming the dependency is publicly fetchable.
+RUN --mount=type=secret,id=gh_token \
+    if [ -s /run/secrets/gh_token ]; then \
+      git config --global url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/"; \
+    fi; \
+    cargo build --release --bin dittobench-miner
 
 # --- runtime ---------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

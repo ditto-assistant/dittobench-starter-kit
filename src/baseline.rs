@@ -37,6 +37,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
+use async_trait::async_trait;
 use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
 use ditto_harness::db::Db;
@@ -44,9 +45,50 @@ use ditto_harness::memory::{
     SaveMemoryRequest, Store, StoreOptions,
 };
 use ditto_harness::models::{ChatModelConfig, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
-use ditto_harness::types::{Embedder, Model};
+use ditto_harness::types::{
+    ChatMessage, Content, Embedder, Model, Result as HarnessResult, Tool, ToolDefinition,
+};
+use serde_json::{json, Value};
 
 use crate::protocol;
+
+/// A stub tool built from a wire tool definition. It exposes the case's
+/// catalog tool to the model — so the agent can *select* it, which is what the
+/// validator scores — and returns a benign placeholder from `execute()` so
+/// multi-turn cases can proceed.
+///
+/// EXTENSION POINT: replace `WireTool` with real `Tool` implementations to
+/// actually execute tools (web search, image generation, ...). Real tool
+/// results can improve multi-hop tool cases and memory answers.
+struct WireTool {
+    def: ToolDefinition,
+}
+
+impl WireTool {
+    fn from_wire(d: &protocol::ToolDefWire) -> WireTool {
+        WireTool {
+            def: ToolDefinition {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                input_schema: d.parameters.clone(),
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for WireTool {
+    fn definition(&self) -> ToolDefinition {
+        self.def.clone()
+    }
+
+    async fn execute(&self, _args: Value) -> HarnessResult<Value> {
+        Ok(json!({
+            "status": "ok",
+            "note": "stub result from the practice harness; replace WireTool with a real Tool to execute",
+        }))
+    }
+}
 
 /// Default local DB path (overridable via `DITTOBENCH_DB`).
 pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
@@ -84,9 +126,14 @@ impl ModelProvider {
 }
 
 /// The optimizable baseline agent.
+///
+/// The harness is rebuilt per `run()` so each case's tool catalog (sent on the
+/// wire) is exposed to the model; the model and store are shared (cheap `Arc`
+/// clones).
 pub struct Baseline {
-    harness: Harness,
+    model: Arc<dyn Model>,
     store: Arc<Store>,
+    include_memory_tools: bool,
 }
 
 impl Baseline {
@@ -100,14 +147,11 @@ impl Baseline {
         let db_path = std::env::var("DITTOBENCH_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
         let store = Self::open_store(&db_path).await?;
         let model = Self::build_model(&ModelProvider::from_env())?;
-        let harness = Harness::new(Options {
+        Ok(Baseline {
             model,
-            memory: Some(Arc::clone(&store)),
-            // EXTENSION POINT: add host tools here.
-            tools: Vec::new(),
+            store,
             include_memory_tools: true,
-        });
-        Ok(Baseline { harness, store })
+        })
     }
 
     /// Opens (creating if needed) the local Turso store with the Ollama
@@ -189,14 +233,40 @@ impl Baseline {
     /// message with `tool_calls`).
     pub async fn run(&self, req: protocol::RunRequest) -> anyhow::Result<protocol::RunResponse> {
         let started = Instant::now();
-        let result = self
-            .harness
+
+        // Expose this case's tool catalog to the model so it can SELECT the
+        // right tool (what the validator scores). Built per-run because the
+        // catalog arrives on the wire. EXTENSION POINT: see `WireTool`.
+        let host_tools: Vec<Arc<dyn Tool>> = req
+            .tools
+            .iter()
+            .map(|d| Arc::new(WireTool::from_wire(d)) as Arc<dyn Tool>)
+            .collect();
+
+        let harness = Harness::new(Options {
+            model: Arc::clone(&self.model),
+            memory: Some(Arc::clone(&self.store)),
+            tools: host_tools,
+            include_memory_tools: self.include_memory_tools,
+        });
+
+        let result = harness
             .run(
                 ChatRunRequest {
                     prepare: PrepareRequest {
                         user_id: USER_ID.to_string(),
+                        // user_input drives memory retrieval (the query)...
                         user_input: req.user_input.clone(),
                         system_prompt: req.system_prompt.clone(),
+                        // ...and is ALSO passed explicitly as the user turn:
+                        // `normalize_messages` only seeds `user_input` as a
+                        // message when there is no system prompt, so with a
+                        // system prompt set we must supply the turn ourselves.
+                        messages: vec![ChatMessage {
+                            role: "user".to_string(),
+                            content: vec![Content::text(req.user_input.clone())],
+                            ..ChatMessage::default()
+                        }],
                         // EXTENSION POINT: retrieval tuning.
                         use_composite: true,
                         ..PrepareRequest::default()
