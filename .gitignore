@@ -1,0 +1,23 @@
+# Build / submission artifacts
+dittobench-submission.tgz
+*.tgz
+/out/
+dittobench-miner
+/cmd/dittobench-miner/dittobench-miner
+
+# Secrets / local env
+.env
+*.env
+
+# Scratch
+.tmp/
+
+# Go
+*.test
+*.out
+*.prof
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
