@@ -12,7 +12,7 @@ path = "src/bin/dittobench-miner.rs"
 [dependencies]
 # The Ditto agent + memory harness (private git dep). Build needs git auth:
 #   export CARGO_NET_GIT_FETCH_WITH_CLI=true
-ditto-harness = { git = "https://github.com/ditto-assistant/ditto-harness", rev = "4f7d0e44a34f53fa7cfa6b7ad007463531aedf38" }
+ditto-harness = { git = "https://github.com/ditto-assistant/ditto-harness", rev = "41bb639727ea6ef6b1cbcf701270dee3cf10d871" }
 
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,3 +24,9 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["clock"] }
+
+# Cross-encoder reranker: ONNX Runtime + BERT WordPiece tokenizer. Mirrors the
+# production cross-encoder/ stage 1:1 (TinyBERT-L2 INT8, RRF fusion).
+ort = "=2.0.0-rc.12"
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
+ndarray = "0.16"

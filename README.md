@@ -11,17 +11,38 @@ cloud — thanks to an **embedded Turso (SQLite-family) database with native
 vector search** inside the [`ditto-harness`](https://github.com/ditto-assistant/ditto-harness)
 crate.
 
+It mirrors Ditto's **production memory retrieval pipeline 1:1** and ships the
+real ranking models as weights:
+
+1. **Vector candidate pool** over the seeded memories (cosine on 768-dim embeddings).
+2. **Composite scoring (V2)** — 7 signals (semantic, linear + exponential recency,
+   subject frequency, subject semantic match, session continuity, neighbor density)
+   fused by weights from a **weight-predictor MLP** (`fixtures/models/mlp-weights.bin`,
+   the production `model.bin`; predicts the fusion weights + scale from the query
+   embedding + 17 aux features).
+3. **Cross-encoder rerank** — a TinyBERT-L2 cross-encoder
+   (`fixtures/models/cross-encoder.onnx`, ONNX via `ort`) reranks the top-20 pool
+   and fuses with composite rank via **Reciprocal Rank Fusion** (k=60, ceWeight=0.7).
+
+It also ships a **self-contained seed user** — a coherent slice of LongMemEval
+with subjects already synced — so you can practice memory **retrieval** with one
+realistic user out of the box.
+
 ## What's in the box
 
 | File | What it is |
 | --- | --- |
-| `src/baseline.rs` | **The agent you optimize.** Wires DB + embedder + model + harness. |
+| `src/baseline.rs` | **The agent you optimize.** Wires DB + embedder + model + MLP predictor + reranker + harness. |
+| `src/reranker.rs` | ONNX cross-encoder reranker — the production rerank stage, 1:1. |
+| `src/seed.rs` | Loads the bundled LongMemEval seed user into the vector DB. |
 | `src/protocol.rs` | The validator HTTP wire contract (see `PROTOCOL.md`). |
 | `src/catalog.rs` | The Ditto tool catalog presented per case. |
 | `src/datagen.rs` | Deterministic-per-seed dataset generator (anti-overfit). |
 | `src/scorer.rs` | Local score report (tool accuracy + memory + latency). |
-| `src/bin/dittobench-miner.rs` | CLI: `serve`, `seed`, `practice`, `submit`. |
-| `fixtures/memory.json` | ~10 seed memory pairs for the `seed` command. |
+| `src/bin/dittobench-miner.rs` | CLI: `serve`, `seed-user`, `mem-eval`, `practice`, `submit`. |
+| `fixtures/seed-user/` | The seed user: pairs + pre-synced subjects + subject graph + LongMemEval questions. |
+| `fixtures/models/` | Shipped weights: `mlp-weights.bin` (217K-param MLP) + `cross-encoder.onnx` (TinyBERT-L2 INT8) + BERT vocab. |
+| `scripts/build-seed-user.py` | Regenerates the seed-user slice from the LongMemEval fixture. |
 
 ## Quickstart
 
@@ -42,13 +63,20 @@ export OPENROUTER_API_KEY=sk-or-...
 #       ollama serve
 #       ollama pull embeddinggemma
 
-# 4. Seed memories, then iterate offline.
-cargo run -- seed
-cargo run -- practice --n 20 --mem 5
+# 4. Load the seed user (one-time; embeds pairs + subjects), then practice.
+cargo run -- seed-user              # load the LongMemEval seed user
+cargo run -- mem-eval --k 10        # retrieval recall over the seed user (no LLM)
+cargo run -- practice --n 20        # tool-calling + speed (needs a chat model)
 
 # 5. Serve the harness for the validator.
 cargo run -- serve --port 8080
 ```
+
+`seed-user` and `mem-eval` need only Ollama (`embeddinggemma`) — no chat model
+or API key — so you can tune retrieval for free. `mem-eval` runs the full
+production pipeline (MLP weights + composite V2 + cross-encoder rerank) and
+reports `recall@k` per LongMemEval question type, isolating retrieval quality
+from the LLM. Keep the same `DITTOBENCH_DB` across `seed-user` and `mem-eval`.
 
 `cargo build` and `cargo test` work offline (no model/embedder needed) — only
 `practice`/`serve` actually call out to the model + Ollama at runtime.
@@ -68,15 +96,28 @@ Everything you tune lives in **`src/baseline.rs`**, marked `EXTENSION POINT`:
 2. **System prompt** — augment the per-case prompt with a tool-use policy and
    abstention rules so the agent picks the right tool (and *no* tool when it
    shouldn't).
-3. **Retrieval / memory** — tune `use_composite`, the long/short-term limits,
-   candidate pool size, and retrieval `variant`; or plug a learned
-   `WeightPredictor` into the store. Better recall = better memory answers.
-4. **Tools** — the baseline ships memory tools only. Add host `Tool`
-   implementations to give the agent real capabilities. (The validator scores
-   tool *selection*, so stub tools that record intent already help tool cases.)
+3. **Retrieval / memory** — the production stack is wired and active: the
+   weight-predictor MLP, composite V2, and the cross-encoder reranker
+   (`open_store`). Tune it by retraining/swapping `fixtures/models/mlp-weights.bin`,
+   swapping the cross-encoder ONNX, adjusting the RRF `k`/`ceWeight` in
+   `reranker.rs`, or changing `candidate_pool_size`/`variant`/limits. Measure
+   with `mem-eval` (`recall@k`). Better recall = better memory answers.
+4. **Tools** — the baseline registers the per-case tool catalog as stub tools so
+   the agent can *select* the right one (what the validator scores). Add real
+   host `Tool` implementations (`WireTool` → your own) to actually execute tools.
 
-Run `practice` after every change and watch `composite`, the per-category tool
-means, `memory_mean`, and the slowest cases.
+Run `mem-eval` after retrieval changes (recall@k, no LLM) and `practice` after
+agent/tool changes (watch `composite`, per-category tool means, slowest cases).
+
+### Embedder note (production parity)
+
+The shipped MLP was trained on the production embedder (Vertex
+`text-embedding-005`). The kit defaults to local **Ollama `embeddinggemma`** for
+a free, self-contained loop, so the MLP sees a different embedding space — the
+**pipeline shape is 1:1**, but absolute composite numbers won't match production.
+The **cross-encoder rerank is fully faithful** (it scores raw text, independent
+of the embedder). For exact production parity, swap `build_embedder` to
+`text-embedding-005`.
 
 ## Submit
 
@@ -95,8 +136,9 @@ your registered hotkey and the subnet `/upload/*` endpoints.
   tool) is the bulk of the tool score — get that solid before polishing args.
 - **Latency counts.** A smaller/faster model that's nearly as accurate often
   beats a slow flagship. Measure with `practice`.
-- **Memory recall needs Ollama embeddings running.** If `practice` reports
-  `memory_mean: 0.000`, check `ollama serve` + `ollama pull embeddinggemma`.
+- **Memory needs the seed user loaded + Ollama embeddings.** Run `seed-user`
+  first; if `mem-eval` reports `recall@k: 0.000`, check `ollama serve` +
+  `ollama pull embeddinggemma` and that `DITTOBENCH_DB` matches what you seeded.
 
 ## License
 

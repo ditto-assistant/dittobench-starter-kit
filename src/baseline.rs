@@ -42,9 +42,10 @@ use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
 use ditto_harness::db::Db;
 use ditto_harness::memory::{
-    SaveMemoryRequest, Store, StoreOptions,
+    CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions,
 };
 use ditto_harness::models::{ChatModelConfig, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
+use ditto_harness::retrieval::{MlpPredictor, Reranker, Variant, WeightPredictor};
 use ditto_harness::types::{
     ChatMessage, Content, Embedder, Model, Result as HarnessResult, Tool, ToolDefinition,
 };
@@ -155,7 +156,8 @@ impl Baseline {
     }
 
     /// Opens (creating if needed) the local Turso store with the Ollama
-    /// embedder.
+    /// embedder, the production weight-predictor MLP, and the production
+    /// cross-encoder reranker — mirroring the production retrieval stack 1:1.
     pub async fn open_store(db_path: &str) -> anyhow::Result<Arc<Store>> {
         let db = Db::open(db_path)
             .await
@@ -164,9 +166,29 @@ impl Baseline {
         Ok(Arc::new(Store::new(StoreOptions {
             db: Arc::new(db),
             embedder,
-            // EXTENSION POINT: plug a learned WeightPredictor here.
-            predictor: None,
+            predictor: Some(Self::build_predictor()?),
+            reranker: Some(Self::build_reranker()?),
         })))
+    }
+
+    /// The weight-predictor MLP (production `model.bin`, shipped in the kit).
+    /// Predicts the 7 composite fusion weights + scale from the query embedding
+    /// + 17 aux features. EXTENSION POINT: retrain and swap the weights.
+    pub fn build_predictor() -> anyhow::Result<Arc<dyn WeightPredictor>> {
+        const MLP_BYTES: &[u8] = include_bytes!("../fixtures/models/mlp-weights.bin");
+        let mlp = MlpPredictor::load_from_reader(MLP_BYTES)
+            .map_err(|e| anyhow::anyhow!("load MLP weights: {e}"))?;
+        Ok(Arc::new(mlp))
+    }
+
+    /// The cross-encoder reranker (production TinyBERT-L2 INT8 `model.onnx` +
+    /// BERT vocab, shipped in the kit). Reranks the composite pool via RRF.
+    /// EXTENSION POINT: swap the ONNX model / fusion weights.
+    pub fn build_reranker() -> anyhow::Result<Arc<dyn Reranker>> {
+        const ONNX_BYTES: &[u8] = include_bytes!("../fixtures/models/cross-encoder.onnx");
+        const VOCAB_TXT: &str = include_str!("../fixtures/models/cross-encoder-vocab.txt");
+        let ce = crate::reranker::CrossEncoderReranker::from_bytes(ONNX_BYTES, VOCAB_TXT)?;
+        Ok(Arc::new(ce))
     }
 
     /// The embedder (Ollama `embeddinggemma`, 768 dims). EXTENSION POINT: swap
@@ -198,6 +220,26 @@ impl Baseline {
     /// Direct access to the underlying store (for seeding memory fixtures).
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    /// Runs the full production retrieval pipeline for `query` and returns the
+    /// retrieved memory pair ids, best-first. Exercises the whole stack —
+    /// MLP-predicted composite weights (V2, pool 50) + cross-encoder rerank —
+    /// without an LLM call, so it isolates and measures retrieval quality.
+    pub async fn retrieve(&self, query: &str, k: usize) -> anyhow::Result<Vec<String>> {
+        let (memories, _meta) = self
+            .store
+            .search_composite_memories(CompositeSearchRequest {
+                user_id: USER_ID.to_string(),
+                query: query.to_string(),
+                limit: k,
+                candidate_pool_size: 50,
+                variant: Variant::V2,
+                ..CompositeSearchRequest::default()
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("retrieve: {err}"))?;
+        Ok(memories.into_iter().map(|m| m.id).collect())
     }
 
     /// Seeds a memory pair into the store (embeds it). Idempotent when `id` is
@@ -267,8 +309,13 @@ impl Baseline {
                             content: vec![Content::text(req.user_input.clone())],
                             ..ChatMessage::default()
                         }],
+                        // Production retrieval config (mirror 1:1): composite V2
+                        // (7 signals + scale), candidate pool 50, MLP-predicted
+                        // weights + cross-encoder rerank are wired on the Store.
                         // EXTENSION POINT: retrieval tuning.
                         use_composite: true,
+                        variant: Variant::V2,
+                        candidate_pool_size: 50,
                         ..PrepareRequest::default()
                     },
                     // One tool call per case is the scored unit; allow a few

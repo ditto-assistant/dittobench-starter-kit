@@ -16,7 +16,6 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::{Parser, Subcommand};
-use serde::Deserialize;
 
 use dittobench_starter_kit::baseline::{Baseline, USER_ID};
 use dittobench_starter_kit::{datagen, protocol, scorer};
@@ -39,11 +38,20 @@ enum Command {
         #[arg(long, default_value_t = 8080)]
         port: u16,
     },
-    /// Load the bundled memory fixture into the local Turso DB (idempotent).
-    Seed {
-        /// Path to a memory fixture JSON file.
-        #[arg(long, default_value = "fixtures/memory.json")]
-        file: String,
+    /// Load the bundled LongMemEval seed user (pairs + pre-synced subjects)
+    /// into the local Turso vector DB, ready for retrieval. Idempotent.
+    SeedUser,
+    /// Evaluate memory RETRIEVAL over the seed user: run the bundled LongMemEval
+    /// questions through the full production retrieval pipeline (MLP weights +
+    /// composite V2 + cross-encoder rerank) and report recall@k. Run `seed-user`
+    /// first. No LLM calls — this isolates retrieval quality.
+    MemEval {
+        /// Retrieve top-k memories per question.
+        #[arg(long, default_value_t = 10)]
+        k: usize,
+        /// Limit the number of questions (0 = all bundled cases).
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
     },
     /// Generate a local dataset, run it through the baseline, and score it.
     Practice {
@@ -61,23 +69,13 @@ enum Command {
     Submit,
 }
 
-/// One memory fixture entry (matches `fixtures/memory.json`).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureEntry {
-    id: String,
-    prompt: String,
-    response: String,
-    #[serde(default)]
-    days_ago: i64,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Serve { port } => serve(port).await,
-        Command::Seed { file } => seed(&file).await,
+        Command::SeedUser => seed_user().await,
+        Command::MemEval { k, limit } => mem_eval(k, limit).await,
         Command::Practice { n, mem, seed } => practice(n, mem, seed).await,
         Command::Submit => submit(),
     }
@@ -125,24 +123,88 @@ async fn run_handler(
     }
 }
 
-// --- seed -------------------------------------------------------------------
+// --- seed-user --------------------------------------------------------------
 
-async fn seed(file: &str) -> anyhow::Result<()> {
-    let raw = std::fs::read_to_string(file)
-        .with_context(|| format!("read fixture {file}"))?;
-    let entries: Vec<FixtureEntry> =
-        serde_json::from_str(&raw).with_context(|| format!("parse fixture {file}"))?;
-    anyhow::ensure!(!entries.is_empty(), "fixture {file} has no entries");
+async fn seed_user() -> anyhow::Result<()> {
+    let baseline = Baseline::from_env().await?;
+    eprintln!("loading bundled LongMemEval seed user into the vector DB (embeds pairs + subjects)...");
+    let stats = dittobench_starter_kit::seed::load_seed_user(baseline.store()).await?;
+    println!(
+        "seeded user {USER_ID:?}: {} pairs, {} subjects, {} subject links — ready for retrieval",
+        stats.pairs, stats.subjects, stats.links
+    );
+    Ok(())
+}
+
+// --- mem-eval ---------------------------------------------------------------
+
+async fn mem_eval(k: usize, limit: usize) -> anyhow::Result<()> {
+    use std::collections::BTreeMap;
+
+    let mut cases = dittobench_starter_kit::seed::memory_cases();
+    if limit > 0 && cases.len() > limit {
+        cases.truncate(limit);
+    }
+    anyhow::ensure!(!cases.is_empty(), "no bundled memory cases");
 
     let baseline = Baseline::from_env().await?;
-    eprintln!("seeding {} memories for user {USER_ID:?}", entries.len());
-    for (i, e) in entries.iter().enumerate() {
-        baseline
-            .seed_memory(&e.id, &e.prompt, &e.response, e.days_ago)
-            .await?;
-        println!("[{:>2}/{}] {}", i + 1, entries.len(), e.id);
+    eprintln!(
+        "evaluating retrieval recall@{k} over {} LongMemEval questions (full pipeline: MLP + composite V2 + cross-encoder rerank)...",
+        cases.len()
+    );
+
+    let mut hits = 0usize; // at least one answer pair retrieved
+    let mut recall_sum = 0.0f64; // fraction of answer pairs retrieved
+    // per question-type aggregates: (hit_count, recall_sum, n)
+    let mut by_type: BTreeMap<String, (usize, f64, usize)> = BTreeMap::new();
+
+    for (i, c) in cases.iter().enumerate() {
+        let retrieved = match baseline.retrieve(&c.query, k).await {
+            Ok(r) => r,
+            Err(err) => {
+                eprintln!("  case {} retrieve failed: {err}", c.question_id);
+                continue;
+            }
+        };
+        let want: std::collections::HashSet<&str> =
+            c.answer_pair_ids.iter().map(String::as_str).collect();
+        let got: std::collections::HashSet<&str> =
+            retrieved.iter().map(String::as_str).collect();
+        let found = want.iter().filter(|p| got.contains(*p)).count();
+        let recall = if want.is_empty() {
+            0.0
+        } else {
+            found as f64 / want.len() as f64
+        };
+        let hit = found > 0;
+        if hit {
+            hits += 1;
+        }
+        recall_sum += recall;
+        let e = by_type.entry(c.question_type.clone()).or_insert((0, 0.0, 0));
+        e.0 += hit as usize;
+        e.1 += recall;
+        e.2 += 1;
+        if (i + 1) % 10 == 0 || i + 1 == cases.len() {
+            eprintln!("  {}/{} questions", i + 1, cases.len());
+        }
     }
-    println!("seeded {} memories", entries.len());
+
+    let n = cases.len() as f64;
+    println!("\n=== DittoBench memory retrieval report (recall@{k}) ===");
+    println!("questions:   {}", cases.len());
+    println!("hit@{k}:      {:.3}   (>=1 answer pair retrieved)", hits as f64 / n);
+    println!("recall@{k}:   {:.3}   (mean fraction of answer pairs retrieved)", recall_sum / n);
+    println!("\nby question type:");
+    for (t, (h, r, cnt)) in &by_type {
+        println!(
+            "  {:<28} hit {:.3}  recall {:.3}  (n={})",
+            t,
+            *h as f64 / *cnt as f64,
+            r / *cnt as f64,
+            cnt
+        );
+    }
     Ok(())
 }
 
