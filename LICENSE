@@ -1,7 +1,8 @@
 Proprietary — Ditto Assistant.
 
-This DittoBench miner starter kit is provided to miners participating in
-Bittensor subnet 118 (SN118) for the purpose of building, testing, and
-submitting an agent harness for the DittoBench benchmark.
+This DittoBench miner starter kit is proprietary to Ditto Assistant. All rights
+reserved unless a separate written agreement states otherwise.
 
-All rights reserved. Not for redistribution outside of SN118 mining use.
+The `ditto-harness` dependency referenced by this project is intended to be
+distributed as open source under its own license; this notice does not relicense
+that dependency.

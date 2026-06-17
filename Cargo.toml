@@ -1,0 +1,26 @@
+[package]
+name = "dittobench-starter-kit"
+version = "0.1.0"
+edition = "2021"
+description = "DittoBench (SN118) miner starter kit: a local agent/memory harness over the ditto-harness crate."
+license = "Proprietary"
+
+[[bin]]
+name = "dittobench-miner"
+path = "src/bin/dittobench-miner.rs"
+
+[dependencies]
+# The Ditto agent + memory harness (private git dep). Build needs git auth:
+#   export CARGO_NET_GIT_FETCH_WITH_CLI=true
+ditto-harness = { git = "https://github.com/ditto-assistant/ditto-harness", rev = "4f7d0e44a34f53fa7cfa6b7ad007463531aedf38" }
+
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+axum = "0.7"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["clock"] }

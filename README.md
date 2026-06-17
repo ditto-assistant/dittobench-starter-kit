@@ -1,167 +1,104 @@
-# DittoBench Miner Starter Kit (SN118)
+# DittoBench miner starter kit (Rust)
 
-A self-contained Go starter kit for mining on **Ditto's Bittensor subnet 118
-(SN118)**. Build a baseline agent harness, then practice the **run + score**
-loop **offline** — on your laptop, with only an OpenRouter API key — before you
-spend anything submitting to the subnet.
+A ready-to-run **agent + memory harness** for **DittoBench**, the benchmark on
+**Bittensor subnet 118 (SN118)**. Miners run an agent that the validator probes
+with tool-calling and memory-recall cases; you earn by being **more correct and
+faster** than other miners.
 
-> Fully self-contained: standard library only. No private Ditto modules, no
-> Postgres, no embeddings. Just `go build ./...`.
+This kit gives you a working baseline plus the **full local eval loop** (tool
+calling + memory + speed) running entirely on your machine — no Postgres, no
+cloud — thanks to an **embedded Turso (SQLite-family) database with native
+vector search** inside the [`ditto-harness`](https://github.com/ditto-assistant/ditto-harness)
+crate.
 
----
+## What's in the box
 
-## What is DittoBench / SN118?
-
-DittoBench is the benchmark that scores agent harnesses on **tool-calling
-correctness**, **token cost**, and **wall-clock speed** (plus memory QA on the
-validator). Miners submit a Go agent harness packaged as a Docker image;
-validators run your image, POST benchmark cases to its `/run` endpoint, score
-the responses, and set weights. This kit gives you a working baseline harness
-plus an offline practice loop so you can iterate before submitting.
-
----
-
-## How you're scored
-
-| Signal | Where | What it measures |
-|--------|-------|------------------|
-| **Tool-calling correctness** | offline + validator | Did you call the right tools (and not extra/wrong ones)? Abstain when no tool is needed. |
-| **Token cost** | offline (reported) + validator | `prompt_tokens` + `output_tokens` per case. Fewer is better. |
-| **Wall-clock** | offline (reported) + validator | `latency_ms` per case. Faster is better. |
-| **Memory QA (LongMemEval)** | **validator only** | Held out. Not part of offline practice (no memory store needed locally). |
-
-Offline practice scores **tool-accuracy** and **reports** latency/tokens so you
-can optimize the parts you can measure on a laptop. Exact tool-accuracy logic is
-in [`pkg/scorer`](pkg/scorer/scorer.go) and documented in
-[`PROTOCOL.md`](PROTOCOL.md).
-
----
-
-## The harness contract
-
-The validator talks to your harness over HTTP:
-
-- `POST /run` — body is a `RunRequest` (case id, system prompt, user input,
-  tool definitions); response is a `RunResponse` (final text, observed tool
-  calls, tokens, latency).
-- `GET /health` — `{"status":"ok"}`.
-
-Full wire shapes: [`PROTOCOL.md`](PROTOCOL.md). Go types:
-[`pkg/protocol/protocol.go`](pkg/protocol/protocol.go).
-
----
+| File | What it is |
+| --- | --- |
+| `src/baseline.rs` | **The agent you optimize.** Wires DB + embedder + model + harness. |
+| `src/protocol.rs` | The validator HTTP wire contract (see `PROTOCOL.md`). |
+| `src/catalog.rs` | The Ditto tool catalog presented per case. |
+| `src/datagen.rs` | Deterministic-per-seed dataset generator (anti-overfit). |
+| `src/scorer.rs` | Local score report (tool accuracy + memory + latency). |
+| `src/bin/dittobench-miner.rs` | CLI: `serve`, `seed`, `practice`, `submit`. |
+| `fixtures/memory.json` | ~10 seed memory pairs for the `seed` command. |
 
 ## Quickstart
 
 ```bash
-git clone <this-kit> dittobench-starter-kit
-cd dittobench-starter-kit
+# 1. Auth for the private harness dep (your git/ssh must have read access).
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
+# 2. Pick a chat model. Default provider is OpenRouter:
 export OPENROUTER_API_KEY=sk-or-...
+# (optional) export DITTOBENCH_MODEL=anthropic/claude-3.5-haiku
 
-# Offline practice: generate a fresh dataset, run it through the baseline
-# harness, and print a score report. This is FREE except OpenRouter tokens.
-go run ./cmd/dittobench-miner practice -n 20
+#    ...or run fully local with Ollama:
+# export DITTOBENCH_PROVIDER=ollama
+# export DITTOBENCH_MODEL=qwen2.5:7b
 
-# Run the harness as the validator will (HTTP server):
-go run ./cmd/dittobench-miner serve -port 8080 -model google/gemini-2.5-flash
-curl localhost:8080/health
+# 3. Embeddings use Ollama's embeddinggemma (768-dim) by default. For memory
+#    cases you need it running locally:
+#       ollama serve
+#       ollama pull embeddinggemma
+
+# 4. Seed memories, then iterate offline.
+cargo run -- seed
+cargo run -- practice --n 20 --mem 5
+
+# 5. Serve the harness for the validator.
+cargo run -- serve --port 8080
 ```
 
-Example `practice` output ends with:
+`cargo build` and `cargo test` work offline (no model/embedder needed) — only
+`practice`/`serve` actually call out to the model + Ollama at runtime.
 
+## The harness contract
+
+The validator calls **`POST /run`** with a `RunRequest` (system prompt, user
+input, available tools) and expects a `RunResponse` (final text, observed tool
+calls, token usage, latency). Full shapes in [`PROTOCOL.md`](PROTOCOL.md).
+
+## How to optimize (this is the whole game)
+
+Everything you tune lives in **`src/baseline.rs`**, marked `EXTENSION POINT`:
+
+1. **Model choice** — swap the OpenRouter model id, or go local with
+   Ollama/vLLM. The single biggest lever on both accuracy and latency.
+2. **System prompt** — augment the per-case prompt with a tool-use policy and
+   abstention rules so the agent picks the right tool (and *no* tool when it
+   shouldn't).
+3. **Retrieval / memory** — tune `use_composite`, the long/short-term limits,
+   candidate pool size, and retrieval `variant`; or plug a learned
+   `WeightPredictor` into the store. Better recall = better memory answers.
+4. **Tools** — the baseline ships memory tools only. Add host `Tool`
+   implementations to give the agent real capabilities. (The validator scores
+   tool *selection*, so stub tools that record intent already help tool cases.)
+
+Run `practice` after every change and watch `composite`, the per-category tool
+means, `memory_mean`, and the slowest cases.
+
+## Submit
+
+```bash
+cargo run -- submit   # packages dittobench-submission.tgz + prints next steps
 ```
-================ DittoBench Practice Report ================
-composite:  0.870  (mean tool_score, 0..1)
-median_ms:  710
-per-category mean:
-  abstention           0.900  (n=2)
-  web_search           1.000  (n=3)
-  ...
-slowest cases:
-  agent_job-0007        1840ms  score=1.00  called=[execute_agent_job]
-===========================================================
-```
 
----
-
-## How to optimize (what moves the score)
-
-The harness loop in [`pkg/harness`](pkg/harness/harness.go) is your extension
-surface. The levers, in rough order of impact:
-
-1. **Your `Model`** — implement `harness.Model.Next(...)`. The reference uses
-   OpenRouter ([`pkg/openrouter`](pkg/openrouter/openrouter.go)); swap models,
-   providers, or add caching/structured-output. Cheaper/faster models lower
-   token-cost and wall-clock.
-2. **Your system prompt** — `defaultSystemPrompt` in
-   [`cmd/dittobench-miner/main.go`](cmd/dittobench-miner/main.go). This drives
-   *when* to call tools and *when to abstain*. Abstention cases are easy points
-   to lose.
-3. **Tool routing / selection** — trim or reorder the tools you expose, or
-   pre-filter the catalog ([`pkg/catalog`](pkg/catalog/catalog.go)) per request
-   so the model isn't tempted into extra calls (each extra call costs `-0.1`).
-4. **Hop budget** — `MaxHops` controls multi-step tool chains. Fewer hops =
-   faster + cheaper, but too few can miss multi-tool cases.
-5. **Retrieval strategy** — for memory-shaped prompts, choosing the right memory
-   tool (`search_memories` vs `search_subjects` vs `search_memories_in_subjects`)
-   is what the validator's memory QA rewards.
-
-**Held out / not in offline practice:** the validator's exact dataset, its
-memory-QA (LongMemEval) corpus, and the cost/speed weighting. Don't overfit to
-`pkg/datagen` — it's a practice generator, not the real one.
-
----
+Real signed upload to the SN118 subnet is a documented TODO stub — wire it to
+your registered hotkey and the subnet `/upload/*` endpoints.
 
 ## Don't waste your time
 
-- **Offline practice is tool-calling + speed only.** There is intentionally no
-  memory store, no embeddings, no Postgres here. The full memory eval runs on
-  the **subnet validator**.
-- **Iterate locally before you pay to submit.** `practice` is the cheap loop —
-  tune prompt/model/routing until `composite` and `median_ms` look good, *then*
-  build the image and submit.
-- **Mock tools are fine for practice.** [`pkg/mocktools`](pkg/mocktools/mocktools.go)
-  returns plausible results so the loop progresses. Scoring only cares *which*
-  tools you called, not the side effects.
+- **Don't overfit the local scorer.** It's a deterministic proxy; the on-chain
+  validator uses an LLM judge and rotates fresh seeds every run.
+- **Don't chase tool *arguments* first.** Tool *selection* (right tool / no
+  tool) is the bulk of the tool score — get that solid before polishing args.
+- **Latency counts.** A smaller/faster model that's nearly as accurate often
+  beats a slow flagship. Measure with `practice`.
+- **Memory recall needs Ollama embeddings running.** If `practice` reports
+  `memory_mean: 0.000`, check `ollama serve` + `ollama pull embeddinggemma`.
 
----
+## License
 
-## Submit flow
-
-```bash
-# 1. Package the repo (sanity tarball + printed next steps).
-go run ./cmd/dittobench-miner submit
-
-# 2. Build the Docker image the validator will run.
-docker build -t dittobench-miner .
-
-# 3. Smoke-test the image.
-docker run -p 8080:8080 -e OPENROUTER_API_KEY=$OPENROUTER_API_KEY dittobench-miner
-curl localhost:8080/health
-
-# 4. Publish + register with SN118 (signed upload).
-#    The signed /upload/* flow is a TODO stub in this kit — see the SN118 miner
-#    docs for hotkey registration, signing, and image publication.
-```
-
----
-
-## Layout
-
-```
-cmd/dittobench-miner/   CLI: serve | practice | submit
-pkg/protocol/           shared wire types (match dittobench-api)
-pkg/catalog/            Ditto tool catalog ([]ToolDefinition)
-pkg/datagen/            seeded practice dataset generator
-pkg/harness/            slim agent harness (the loop you optimize)
-pkg/openrouter/         reference Model impl (OpenRouter)
-pkg/mocktools/          default mock ToolExecutor
-pkg/scorer/             tool-accuracy scoring (mirrors validator)
-Dockerfile              multi-stage build → minimal serve image
-PROTOCOL.md             wire contract reference
-```
-
----
-
-Proprietary — Ditto Assistant. For SN118 miners. See [`LICENSE`](LICENSE).
+Proprietary — Ditto Assistant. The `ditto-harness` dependency is intended to be
+open source.

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # ditto-harness is a private git dependency: cargo must fetch it via the
+  # system git so it can use the SSH deploy key / credentials below.
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.toml') }}
+
+      # NOTE: ditto-harness is private. Provide an SSH deploy key with read
+      # access as the `DITTO_HARNESS_DEPLOY_KEY` repo secret, or make the
+      # dependency public and delete this step.
+      - name: Configure git auth for private dep
+        if: ${{ env.DITTO_HARNESS_DEPLOY_KEY != '' }}
+        env:
+          DITTO_HARNESS_DEPLOY_KEY: ${{ secrets.DITTO_HARNESS_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DITTO_HARNESS_DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Test
+        run: cargo test --verbose
