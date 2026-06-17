@@ -1,9 +1,14 @@
 name: CI
 
+# Manual-only for now: the org's GitHub Actions budget is exhausted, so
+# push/PR-triggered runs fail to start ("Actions budget is preventing further
+# use") and show a spurious red X. Run on demand via the Actions tab. To restore
+# automatic CI, raise the Actions spending limit in org Settings → Billing, then
+# re-add the `push`/`pull_request` triggers below. (Note: CI also needs the
+# DITTO_HARNESS_DEPLOY_KEY secret to fetch the private ditto-harness dep, and
+# the ort crate downloads ONNX Runtime at build time.)
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   # ditto-harness is a private git dependency: cargo must fetch it via the

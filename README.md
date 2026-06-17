@@ -168,5 +168,4 @@ your registered hotkey and the subnet `/upload/*` endpoints.
 
 ## License
 
-Proprietary — Ditto Assistant. The `ditto-harness` dependency is intended to be
-open source.
+MIT — see [`LICENSE`](LICENSE). The `ditto-harness` dependency is also MIT.

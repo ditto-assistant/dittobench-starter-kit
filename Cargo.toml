@@ -3,7 +3,7 @@ name = "dittobench-starter-kit"
 version = "0.1.0"
 edition = "2021"
 description = "DittoBench (SN118) miner starter kit: a local agent/memory harness over the ditto-harness crate."
-license = "Proprietary"
+license = "MIT"
 
 [[bin]]
 name = "dittobench-miner"
