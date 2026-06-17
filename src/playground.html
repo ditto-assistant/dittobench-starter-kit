@@ -114,7 +114,7 @@ function renderTrace(tools,mems){
   document.getElementById('trace-tools').innerHTML = (tools&&tools.length)
     ? tools.map(t=>`<div class="event"><span class="name">${esc(t.name)}</span>
         <pre>args: ${j(t.args)}\nresult: ${j(t.result)}</pre></div>`).join('')
-    : '<div class="empty">No action tools were called this turn.</div>';
+    : '<div class="empty">No tools were called this turn.</div>';
   document.getElementById('trace-mem').innerHTML = (mems&&mems.length)
     ? mems.map(m=>`<div class="mem"><span class="score">${m.score.toFixed(3)}</span>
         <span class="id">${esc(m.pair_id)}</span><div>${esc(m.preview)}</div></div>`).join('')

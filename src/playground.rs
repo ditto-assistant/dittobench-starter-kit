@@ -42,9 +42,10 @@ pub const PROD_DEFAULT_MODEL: &str = "google/gemini-3.1-flash-lite";
 
 /// A tool that returns a plausible canned result instead of executing. Lets the
 /// agent loop run realistically so you can watch tool selection + multi-hop use.
+/// (The call + result are recovered from the run transcript, alongside the real
+/// memory-tool calls — see `playground_turn`.)
 struct FakeTool {
     def: ToolDefinition,
-    trace: Arc<Mutex<Vec<ToolEvent>>>,
 }
 
 #[async_trait]
@@ -54,13 +55,7 @@ impl Tool for FakeTool {
     }
 
     async fn execute(&self, args: Value) -> HarnessResult<Value> {
-        let result = fake_response(&self.def.name, &args);
-        self.trace.lock().expect("trace lock").push(ToolEvent {
-            name: self.def.name.clone(),
-            args: args.clone(),
-            result: result.clone(),
-        });
-        Ok(result)
+        Ok(fake_response(&self.def.name, &args))
     }
 }
 
@@ -209,8 +204,6 @@ pub async fn playground_turn(
     history: &[(String, String)],
     user_input: &str,
 ) -> anyhow::Result<PlaygroundTurn> {
-    let trace: Arc<Mutex<Vec<ToolEvent>>> = Arc::new(Mutex::new(Vec::new()));
-
     // Fake action tools = full catalog minus the real memory tools.
     let host_tools: Vec<Arc<dyn Tool>> = crate::catalog::catalog()
         .into_iter()
@@ -222,7 +215,6 @@ pub async fn playground_turn(
                     description: d.description,
                     input_schema: d.parameters,
                 },
-                trace: Arc::clone(&trace),
             }) as Arc<dyn Tool>
         })
         .collect();
@@ -271,7 +263,33 @@ pub async fn playground_turn(
         .await
         .map_err(|e| anyhow::anyhow!("playground run: {e}"))?;
 
-    let tools = trace.lock().expect("trace lock").clone();
+    // Recover ALL tool calls from the transcript — both the fake action tools
+    // and the REAL memory tools (search_memories, fetch_memories, ...). Tool
+    // results live in `Content.tool_call_response` keyed by the call id.
+    let mut results: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    for m in &result.result.messages {
+        for c in &m.content {
+            if let Some(tr) = &c.tool_call_response {
+                let r = if !tr.error.is_empty() {
+                    json!({ "error": tr.error })
+                } else {
+                    tr.output.clone()
+                };
+                results.insert(tr.id.clone(), r);
+            }
+        }
+    }
+    let mut tools: Vec<ToolEvent> = Vec::new();
+    for m in &result.result.messages {
+        for tc in &m.tool_calls {
+            tools.push(ToolEvent {
+                name: tc.name.clone(),
+                args: tc.args.clone(),
+                result: results.get(&tc.id).cloned().unwrap_or(Value::Null),
+            });
+        }
+    }
+
     let memories = baseline
         .retrieve_previews(user_input, 6)
         .await
