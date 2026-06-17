@@ -30,3 +30,4 @@ chrono = { version = "0.4", features = ["clock"] }
 ort = "=2.0.0-rc.12"
 tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
 ndarray = "0.16"
+dotenvy = "0.15"

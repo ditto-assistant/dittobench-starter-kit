@@ -72,6 +72,28 @@ cargo run -- practice --n 20        # tool-calling + speed (needs a chat model)
 cargo run -- serve --port 8080
 ```
 
+## Playground (talk to the agent)
+
+The fastest way to *feel* the agent is the interactive playground — a chat UI
+wired to a **1:1 production-Ditto agent** (the real v2 system prompt + persona +
+tool-use policy, the prod default model `google/gemini-3.1-flash-lite`, the full
+tool catalog, and real memory retrieval + cross-encoder rerank over the seed
+user). **Action tools (search_web, create_image, agent jobs, settings, …) return
+fake-but-plausible results** so you can exercise tool-calling without real
+integrations; **memory tools are real** and query the seed user.
+
+```bash
+cp .env.example .env        # paste your OPENROUTER_API_KEY into .env
+cargo run -- seed-user      # one-time: load the dummy seed user
+cargo run -- playground     # open http://127.0.0.1:8088
+```
+
+The UI shows the **full tool catalog** (every tool's description + JSON schema),
+and after each turn a live **trace** of the tool calls (args + fake results) and
+the **memories retrieved** for that query. Try _"search the web for…"_ (watch
+`search_web` fire) or _"how many postcards have I collected?"_ (watch memory
+retrieval answer with `ditto://memory/…` citations).
+
 `seed-user` and `mem-eval` need only Ollama (`embeddinggemma`) — no chat model
 or API key — so you can tune retrieval for free. `mem-eval` runs the full
 production pipeline (MLP weights + composite V2 + cross-encoder rerank) and

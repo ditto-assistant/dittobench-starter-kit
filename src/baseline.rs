@@ -222,6 +222,47 @@ impl Baseline {
         &self.store
     }
 
+    /// Shared handle to the chat model (for the playground to build its own
+    /// harness with fake tools).
+    pub fn model_arc(&self) -> Arc<dyn Model> {
+        Arc::clone(&self.model)
+    }
+
+    /// Retrieves the top-k memories for `query` through the full production
+    /// pipeline (MLP weights + composite V2 + cross-encoder rerank) and returns
+    /// `(pair_id, preview, composite_score)` for display.
+    pub async fn retrieve_previews(
+        &self,
+        query: &str,
+        k: usize,
+    ) -> anyhow::Result<Vec<(String, String, f64)>> {
+        let (memories, _meta) = self
+            .store
+            .search_composite_memories(CompositeSearchRequest {
+                user_id: USER_ID.to_string(),
+                query: query.to_string(),
+                limit: k,
+                candidate_pool_size: 50,
+                variant: Variant::V2,
+                ..CompositeSearchRequest::default()
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("retrieve previews: {err}"))?;
+        Ok(memories
+            .into_iter()
+            .map(|m| {
+                let text = match (m.prompt.trim().is_empty(), m.response.trim().is_empty()) {
+                    (false, false) => format!("{} → {}", m.prompt.trim(), m.response.trim()),
+                    (false, true) => m.prompt.trim().to_string(),
+                    (true, false) => m.response.trim().to_string(),
+                    (true, true) => String::new(),
+                };
+                let preview: String = text.chars().take(200).collect();
+                (m.id, preview, m.composite_score)
+            })
+            .collect())
+    }
+
     /// Runs the full production retrieval pipeline for `query` and returns the
     /// retrieved memory pair ids, best-first. Exercises the whole stack —
     /// MLP-predicted composite weights (V2, pool 50) + cross-encoder rerank —

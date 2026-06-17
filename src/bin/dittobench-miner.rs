@@ -38,6 +38,12 @@ enum Command {
         #[arg(long, default_value_t = 8080)]
         port: u16,
     },
+    /// Launch the interactive playground UI: chat with a 1:1 prod-Ditto agent
+    /// over the seed user, with the tool catalog + live tool-call/memory trace.
+    Playground {
+        #[arg(long, default_value_t = 8088)]
+        port: u16,
+    },
     /// Load the bundled LongMemEval seed user (pairs + pre-synced subjects)
     /// into the local Turso vector DB, ready for retrieval. Idempotent.
     SeedUser,
@@ -71,9 +77,12 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env if present so miners can just paste their OPENROUTER_API_KEY.
+    let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     match cli.command {
         Command::Serve { port } => serve(port).await,
+        Command::Playground { port } => dittobench_starter_kit::playground::serve(port).await,
         Command::SeedUser => seed_user().await,
         Command::MemEval { k, limit } => mem_eval(k, limit).await,
         Command::Practice { n, mem, seed } => practice(n, mem, seed).await,

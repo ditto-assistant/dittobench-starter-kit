@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DittoBench Playground</title>
+<style>
+  :root {
+    --paper:#f6f4ed; --paper2:#ece6da; --ink:#342d28; --soft:#5a524b; --faint:#827a73;
+    --brass:#b58635; --green:#487858; --line:#ddd5c7; --user:#e7eef0; --ditto:#fff;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Commissioner,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:linear-gradient(180deg,var(--paper),var(--paper2));color:var(--ink);height:100vh;display:flex;flex-direction:column}
+  header{padding:10px 18px;border-bottom:2px solid var(--brass);display:flex;align-items:baseline;gap:12px}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sub{font-size:12px;color:var(--faint)}
+  main{flex:1;display:flex;min-height:0}
+  /* chat */
+  .chat{flex:1;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line)}
+  .msgs{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+  .msg{max-width:80%;padding:10px 14px;border-radius:12px;white-space:pre-wrap;line-height:1.45;font-size:14px;border:1px solid var(--line)}
+  .msg.user{align-self:flex-end;background:var(--user)}
+  .msg.ditto{align-self:flex-start;background:var(--ditto)}
+  .msg.sys{align-self:center;background:transparent;border:none;color:var(--faint);font-size:12px}
+  .composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--paper)}
+  .composer textarea{flex:1;resize:none;height:46px;padding:10px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px}
+  .composer button{padding:0 18px;border:none;border-radius:10px;background:var(--brass);color:#fff;font-weight:600;cursor:pointer}
+  .composer button:disabled{opacity:.5;cursor:default}
+  /* panel */
+  .panel{width:42%;max-width:560px;display:flex;flex-direction:column;background:var(--paper)}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;padding:10px;border:none;background:transparent;cursor:pointer;font:inherit;font-weight:600;color:var(--soft);border-bottom:2px solid transparent}
+  .tabs button.active{color:var(--ink);border-bottom-color:var(--brass)}
+  .panel .body{flex:1;overflow:auto;padding:14px}
+  .tool{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fff}
+  .tool .h{padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .tool .name{font-family:var(--mono);font-weight:700;font-size:13px}
+  .tool .kind{font-size:10px;color:#fff;background:var(--soft);border-radius:6px;padding:2px 6px;white-space:nowrap}
+  .tool .kind.real{background:var(--green)}
+  .tool .desc{padding:0 12px 10px;font-size:12.5px;color:var(--soft)}
+  .tool pre{margin:0 12px 12px;background:var(--paper2);border-radius:8px;padding:10px;overflow:auto;font-family:var(--mono);font-size:11.5px}
+  .hide{display:none}
+  .event{border:1px solid var(--line);border-left:3px solid var(--brass);border-radius:8px;background:#fff;margin-bottom:10px;padding:8px 12px}
+  .event .name{font-family:var(--mono);font-weight:700;font-size:13px}
+  .event pre{background:var(--paper2);border-radius:6px;padding:8px;margin:6px 0 0;overflow:auto;font-family:var(--mono);font-size:11px}
+  .mem{border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:8px;padding:8px 12px;font-size:12.5px}
+  .mem .id{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .mem .score{float:right;color:var(--green);font-weight:600;font-size:11px}
+  .empty{color:var(--faint);font-size:13px;padding:8px}
+  h3{margin:4px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint)}
+</style>
+</head>
+<body>
+<header>
+  <h1>DittoBench Playground</h1>
+  <span class="sub">a 1:1 prod-Ditto agent over the dummy seed user · action tools return fake responses</span>
+</header>
+<main>
+  <section class="chat">
+    <div class="msgs" id="msgs">
+      <div class="msg sys">Talk to Ditto. Try: <em>"search the web for the best running shoes"</em>, or ask about the seed user's history (e.g. <em>"how many postcards have I collected?"</em>) to see memory retrieval. The right panel shows the tool catalog and the last turn's tool calls + retrieved memories.</div>
+    </div>
+    <div class="composer">
+      <textarea id="input" placeholder="Message Ditto…  (Enter to send, Shift+Enter for newline)"></textarea>
+      <button id="send">Send</button>
+    </div>
+  </section>
+  <aside class="panel">
+    <div class="tabs">
+      <button id="tab-tools" class="active" onclick="showTab('tools')">Tools</button>
+      <button id="tab-trace" onclick="showTab('trace')">Last turn</button>
+    </div>
+    <div class="body">
+      <div id="view-tools"></div>
+      <div id="view-trace" class="hide">
+        <h3>Tool calls</h3><div id="trace-tools"><div class="empty">No tool calls yet.</div></div>
+        <h3>Retrieved memories</h3><div id="trace-mem"><div class="empty">Send a message to see retrieval.</div></div>
+      </div>
+    </div>
+  </aside>
+</main>
+<script>
+const sid = "pg-" + Math.random().toString(36).slice(2);
+const esc = s => (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const j = o => esc(JSON.stringify(o,null,2));
+
+function showTab(t){
+  document.getElementById('view-tools').classList.toggle('hide',t!=='tools');
+  document.getElementById('view-trace').classList.toggle('hide',t!=='trace');
+  document.getElementById('tab-tools').classList.toggle('active',t==='tools');
+  document.getElementById('tab-trace').classList.toggle('active',t==='trace');
+}
+function addMsg(role,text){
+  const d=document.createElement('div'); d.className='msg '+(role==='user'?'user':'ditto');
+  d.textContent=text; const m=document.getElementById('msgs'); m.appendChild(d); m.scrollTop=m.scrollHeight; return d;
+}
+async function loadTools(){
+  const r=await fetch('/api/tools'); const {tools}=await r.json();
+  document.getElementById('view-tools').innerHTML = tools.map((t,i)=>{
+    const real=t.kind.startsWith('memory');
+    return `<div class="tool">
+      <div class="h" onclick="document.getElementById('sch${i}').classList.toggle('hide')">
+        <span class="name">${esc(t.name)}</span>
+        <span class="kind ${real?'real':''}">${real?'memory':'fake'}</span>
+      </div>
+      <div class="desc">${esc(t.description)}</div>
+      <pre id="sch${i}" class="hide">${j(t.parameters)}</pre>
+    </div>`;
+  }).join('');
+}
+function renderTrace(tools,mems){
+  document.getElementById('trace-tools').innerHTML = (tools&&tools.length)
+    ? tools.map(t=>`<div class="event"><span class="name">${esc(t.name)}</span>
+        <pre>args: ${j(t.args)}\nresult: ${j(t.result)}</pre></div>`).join('')
+    : '<div class="empty">No action tools were called this turn.</div>';
+  document.getElementById('trace-mem').innerHTML = (mems&&mems.length)
+    ? mems.map(m=>`<div class="mem"><span class="score">${m.score.toFixed(3)}</span>
+        <span class="id">${esc(m.pair_id)}</span><div>${esc(m.preview)}</div></div>`).join('')
+    : '<div class="empty">No memories retrieved.</div>';
+}
+async function send(){
+  const inp=document.getElementById('input'); const btn=document.getElementById('send');
+  const text=inp.value.trim(); if(!text) return;
+  inp.value=''; addMsg('user',text); btn.disabled=true;
+  const thinking=addMsg('ditto','…');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({session_id:sid,message:text})});
+    const data=await r.json();
+    if(data.error){ thinking.textContent='⚠ '+data.error; }
+    else{ thinking.textContent=data.reply||'(no reply)'; renderTrace(data.tools,data.memories); showTab('trace'); }
+  }catch(e){ thinking.textContent='⚠ '+e; }
+  btn.disabled=false; inp.focus();
+}
+document.getElementById('send').onclick=send;
+document.getElementById('input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}
+});
+loadTools();
+</script>
+</body>
+</html>
