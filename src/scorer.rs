@@ -117,7 +117,9 @@ pub fn answer_matches(final_text: &str, expected: &str) -> bool {
     final_text.to_lowercase().contains(&expected.to_lowercase())
 }
 
-fn score_tool_case(c: &ToolCase, resp: Option<&RunResponse>) -> CaseScore {
+/// Scores a single tool case against a harness response (exposed for live,
+/// per-case scoring in the playground; the rule matches [`score`]).
+pub fn score_tool_case(c: &ToolCase, resp: Option<&RunResponse>) -> CaseScore {
     let called: Vec<String> = resp
         .map(|r| r.tool_calls.iter().map(|tc| tc.name.clone()).collect())
         .unwrap_or_default();

@@ -50,6 +50,35 @@
   .mem .score{float:right;color:var(--green);font-weight:600;font-size:11px}
   .empty{color:var(--faint);font-size:13px;padding:8px}
   h3{margin:4px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint)}
+  /* score tab */
+  .score-intro{font-size:12.5px;color:var(--soft);background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;line-height:1.45}
+  .score-controls{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+  .score-controls label{font-size:12px;color:var(--soft);display:flex;align-items:center;gap:6px}
+  .score-controls input{width:54px;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit}
+  #sc-run{padding:7px 16px;border:none;border-radius:9px;background:var(--brass);color:#fff;font-weight:600;cursor:pointer}
+  #sc-run:disabled{opacity:.55;cursor:default}
+  .bar{height:7px;background:var(--paper2);border-radius:5px;overflow:hidden;margin-bottom:6px}
+  .fill{height:100%;width:0;background:var(--brass);transition:width .3s}
+  .score-status{font-size:12px;color:var(--faint);margin-bottom:10px}
+  #sc-summary{display:flex;align-items:center;gap:18px;background:#fff;border:1px solid var(--brass);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .sc-headline .big{font-size:34px;font-weight:800;color:var(--ink);line-height:1}
+  .sc-headline .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+  .sc-metrics{display:flex;gap:18px;margin-left:auto}
+  .sc-metrics div{text-align:center}
+  .sc-metrics b{display:block;font-size:18px;color:var(--ink)}
+  .sc-metrics span{font-size:11px;color:var(--faint)}
+  .sc-case{border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px 10px;margin-bottom:7px;font-size:12.5px;display:grid;grid-template-columns:auto auto auto 1fr auto;align-items:center;gap:8px}
+  .sc-case .sc-prompt{grid-column:1/-1;color:var(--ink);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc-case .sc-detail{grid-column:1/-1;color:var(--faint);font-size:11.5px;font-family:var(--mono)}
+  .sc-score{font-weight:700;font-family:var(--mono)}
+  .sc-kind{font-size:10px;color:#fff;border-radius:5px;padding:1px 6px;background:var(--soft)}
+  .sc-kind.memory{background:var(--green)}
+  .sc-cat{font-size:11px;color:var(--soft);font-family:var(--mono)}
+  .sc-lat{font-size:11px;color:var(--faint);text-align:right}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--faint)}
+  .dot.good{background:var(--green)} .dot.ok{background:var(--brass)} .dot.bad{background:#b4564f}
+  ul.legend{margin:0;padding-left:18px;font-size:12px;color:var(--soft);line-height:1.5}
+  ul.legend .dot{margin:0 2px}
 </style>
 </head>
 <body>
@@ -71,12 +100,37 @@
     <div class="tabs">
       <button id="tab-tools" class="active" onclick="showTab('tools')">Tools</button>
       <button id="tab-trace" onclick="showTab('trace')">Last turn</button>
+      <button id="tab-score" onclick="showTab('score')">Score</button>
     </div>
     <div class="body">
       <div id="view-tools"></div>
       <div id="view-trace" class="hide">
         <h3>Tool calls</h3><div id="trace-tools"><div class="empty">No tool calls yet.</div></div>
         <h3>Retrieved memories</h3><div id="trace-mem"><div class="empty">Send a message to see retrieval.</div></div>
+      </div>
+      <div id="view-score" class="hide">
+        <div class="score-intro">Run the <b>fixed local benchmark</b> — the same seed user, the same questions, and a fixed tool set every run — so you can watch the agent get scored and compare runs. (The hosted validator rotates a fresh dataset; this one is reproducible.)</div>
+        <div class="score-controls">
+          <label>Tool cases <input id="sc-tools" type="number" min="1" max="20" value="6"></label>
+          <label>Memory Qs <input id="sc-mem" type="number" min="1" max="20" value="6"></label>
+          <button id="sc-run">Run scoring</button>
+        </div>
+        <div id="sc-progress" class="hide">
+          <div class="bar"><div id="sc-bar" class="fill"></div></div>
+          <div id="sc-status" class="score-status"></div>
+        </div>
+        <div id="sc-summary" class="hide"></div>
+        <div id="sc-cases"></div>
+        <div id="sc-legend" class="hide">
+          <h3>How to read this</h3>
+          <ul class="legend">
+            <li><b>Composite</b> = 0.6 × tool score + 0.4 × memory score (the headline number).</li>
+            <li><b>Tool score</b> (per case): matched ÷ expected tools, −0.1 per extra call, clamped 0–1. A "no-tool" case scores 1.0 only if the agent called nothing.</li>
+            <li><b>Memory score</b> (per question): 1.0 if the expected answer appears in the reply (case-insensitive substring), else 0 — a fast local proxy for the on-chain LLM judge.</li>
+            <li><b>Score colors:</b> <span class="dot good"></span> 1.0 · <span class="dot ok"></span> partial · <span class="dot bad"></span> 0.</li>
+            <li>Inputs are fixed, but the model is stochastic — expect small run-to-run variation.</li>
+          </ul>
+        </div>
       </div>
     </div>
   </aside>
@@ -87,10 +141,10 @@ const esc = s => (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&
 const j = o => esc(JSON.stringify(o,null,2));
 
 function showTab(t){
-  document.getElementById('view-tools').classList.toggle('hide',t!=='tools');
-  document.getElementById('view-trace').classList.toggle('hide',t!=='trace');
-  document.getElementById('tab-tools').classList.toggle('active',t==='tools');
-  document.getElementById('tab-trace').classList.toggle('active',t==='trace');
+  for(const k of ['tools','trace','score']){
+    document.getElementById('view-'+k).classList.toggle('hide',t!==k);
+    document.getElementById('tab-'+k).classList.toggle('active',t===k);
+  }
 }
 function addMsg(role,text){
   const d=document.createElement('div'); d.className='msg '+(role==='user'?'user':'ditto');
@@ -138,6 +192,60 @@ document.getElementById('send').onclick=send;
 document.getElementById('input').addEventListener('keydown',e=>{
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}
 });
+
+// ---- scoring ----
+const scoreCls = s => s>=0.999?'good':(s>0?'ok':'bad');
+function renderScoreCases(job){
+  document.getElementById('sc-cases').innerHTML = job.cases.map(c=>`
+    <div class="sc-case">
+      <span class="dot ${scoreCls(c.score)}"></span>
+      <span class="sc-score">${c.score.toFixed(2)}</span>
+      <span class="sc-kind ${c.kind}">${esc(c.kind)}</span>
+      <span class="sc-cat">${esc(c.category)}</span>
+      <span class="sc-lat">${c.latency_ms} ms</span>
+      <div class="sc-prompt">${esc(c.prompt)}</div>
+      <div class="sc-detail">${esc(c.detail)}</div>
+    </div>`).join('');
+}
+function renderScoreSummary(job){
+  const sum=document.getElementById('sc-summary');
+  sum.classList.remove('hide');
+  sum.innerHTML=`
+    <div class="sc-headline"><div class="big">${job.composite.toFixed(3)}</div><div class="lbl">composite</div></div>
+    <div class="sc-metrics">
+      <div><b>${job.tool_mean.toFixed(3)}</b><span>tool</span></div>
+      <div><b>${job.memory_mean.toFixed(3)}</b><span>memory</span></div>
+      <div><b>${job.median_ms}</b><span>median ms</span></div>
+    </div>`;
+}
+async function runScore(){
+  const btn=document.getElementById('sc-run');
+  const tools=+document.getElementById('sc-tools').value||6;
+  const mem=+document.getElementById('sc-mem').value||6;
+  btn.disabled=true; btn.textContent='Scoring…';
+  document.getElementById('sc-summary').classList.add('hide');
+  document.getElementById('sc-cases').innerHTML='';
+  document.getElementById('sc-progress').classList.remove('hide');
+  document.getElementById('sc-legend').classList.remove('hide');
+  try{
+    const r=await fetch('/api/score',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tools,mem})});
+    const {job_id}=await r.json();
+    while(true){
+      await new Promise(s=>setTimeout(s,700));
+      const job=await (await fetch('/api/score/'+job_id)).json();
+      const pct=job.total?Math.round(100*job.done/job.total):0;
+      document.getElementById('sc-bar').style.width=pct+'%';
+      document.getElementById('sc-status').textContent=
+        job.status==='done'?`done · ${job.done} cases scored`:`scoring ${job.done}/${job.total}…`;
+      renderScoreCases(job);
+      if(job.status==='done'){ renderScoreSummary(job); break; }
+      if(job.status==='error'){ document.getElementById('sc-status').textContent='⚠ '+job.error; break; }
+    }
+  }catch(e){ document.getElementById('sc-status').textContent='⚠ '+e; }
+  btn.disabled=false; btn.textContent='Run scoring';
+}
+document.getElementById('sc-run').onclick=runScore;
+
 loadTools();
 </script>
 </body>

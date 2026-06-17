@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
@@ -398,10 +398,41 @@ Respond naturally and helpfully as Ditto."#;
 // HTTP server
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Scoring (live local evaluation)
+// ---------------------------------------------------------------------------
+
+/// One scored case, streamed as the run progresses.
+#[derive(Clone, Serialize)]
+pub struct ScoredCase {
+    pub kind: String, // "tool" | "memory"
+    pub case_id: String,
+    pub category: String,
+    pub prompt: String,
+    pub score: f64,
+    pub latency_ms: i64,
+    pub detail: String,
+}
+
+/// A scoring job's live state (polled by the UI).
+#[derive(Clone, Serialize, Default)]
+pub struct ScoreJob {
+    pub status: String, // "running" | "done" | "error"
+    pub done: usize,
+    pub total: usize,
+    pub cases: Vec<ScoredCase>,
+    pub composite: f64,
+    pub tool_mean: f64,
+    pub memory_mean: f64,
+    pub median_ms: i64,
+    pub error: String,
+}
+
 #[derive(Clone)]
 struct AppState {
     baseline: Arc<Baseline>,
     sessions: Arc<Mutex<HashMap<String, Vec<(String, String)>>>>,
+    score_jobs: Arc<Mutex<HashMap<String, ScoreJob>>>,
 }
 
 #[derive(Deserialize)]
@@ -427,12 +458,15 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
     let state = AppState {
         baseline,
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        score_jobs: Arc::new(Mutex::new(HashMap::new())),
     };
     let app = Router::new()
         .route("/", get(|| async { Html(INDEX_HTML) }))
         .route("/api/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/api/tools", get(tools_handler))
         .route("/api/chat", post(chat_handler))
+        .route("/api/score", post(score_start_handler))
+        .route("/api/score/:id", get(score_poll_handler))
         .with_state(state);
 
     let addr = format!("127.0.0.1:{port}");
@@ -494,4 +528,202 @@ async fn chat_handler(State(state): State<AppState>, Json(req): Json<ChatReq>) -
         )
             .into_response(),
     }
+}
+
+// ---- scoring handlers ----
+
+#[derive(Deserialize)]
+struct ScoreStartReq {
+    #[serde(default)]
+    tools: usize,
+    #[serde(default)]
+    mem: usize,
+}
+
+/// Fixed dataset seed for the local scoring demo (same cases every run).
+const SCORE_SEED: i64 = 7;
+
+/// Starts a scoring run in the background and returns its job id to poll.
+async fn score_start_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ScoreStartReq>,
+) -> impl IntoResponse {
+    let n_tools = if req.tools == 0 { 6 } else { req.tools.min(20) };
+    let n_mem = if req.mem == 0 { 6 } else { req.mem.min(20) };
+    let job_id = uuid::Uuid::new_v4().to_string();
+    {
+        let mut jobs = state.score_jobs.lock().expect("score_jobs lock");
+        jobs.insert(
+            job_id.clone(),
+            ScoreJob {
+                status: "running".to_string(),
+                ..ScoreJob::default()
+            },
+        );
+    }
+    let baseline = Arc::clone(&state.baseline);
+    let jobs = Arc::clone(&state.score_jobs);
+    let id = job_id.clone();
+    tokio::spawn(async move { run_scoring(baseline, jobs, id, n_tools, n_mem).await });
+    Json(json!({ "job_id": job_id }))
+}
+
+/// Returns the current state of a scoring job.
+async fn score_poll_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let jobs = state.score_jobs.lock().expect("score_jobs lock");
+    match jobs.get(&id) {
+        Some(job) => (StatusCode::OK, Json(job.clone())).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!({"error":"unknown job"}))).into_response(),
+    }
+}
+
+fn push_case(jobs: &Arc<Mutex<HashMap<String, ScoreJob>>>, id: &str, case: ScoredCase) {
+    let mut j = jobs.lock().expect("score_jobs lock");
+    if let Some(job) = j.get_mut(id) {
+        job.cases.push(case);
+        job.done += 1;
+    }
+}
+
+/// Runs the FIXED local evaluation (static seed user + same questions + a
+/// fixed-seed tool set) and streams per-case scores into the job, then the
+/// aggregate. Mirrors the `evaluate` CLI command.
+async fn run_scoring(
+    baseline: Arc<Baseline>,
+    jobs: Arc<Mutex<HashMap<String, ScoreJob>>>,
+    job_id: String,
+    n_tools: usize,
+    n_mem: usize,
+) {
+    let ds = crate::datagen::generate(SCORE_SEED, n_tools, 0);
+    let mut mem_cases = crate::seed::memory_cases();
+    if n_mem > 0 && mem_cases.len() > n_mem {
+        mem_cases.truncate(n_mem);
+    }
+    {
+        let mut j = jobs.lock().expect("score_jobs lock");
+        if let Some(job) = j.get_mut(&job_id) {
+            job.total = ds.tool_cases.len() + mem_cases.len();
+        }
+    }
+    let catalog = crate::catalog::catalog();
+    let tool_sys = "You are Ditto, a helpful assistant. Use a tool when the user's request \
+        clearly needs one; otherwise just answer.";
+    let mem_sys = "You are Ditto. Answer using the user's memories when relevant; search \
+        memories if needed.";
+
+    let mut tool_scores: Vec<f64> = Vec::new();
+    let mut mem_scores: Vec<f64> = Vec::new();
+    let mut latencies: Vec<i64> = Vec::new();
+
+    // Tool cases (fixed seed).
+    for c in &ds.tool_cases {
+        let req = crate::protocol::RunRequest {
+            case_id: c.id.clone(),
+            system_prompt: tool_sys.to_string(),
+            user_input: c.prompt.clone(),
+            tools: catalog.clone(),
+        };
+        let (score, latency, detail) = match baseline.run(req).await {
+            Ok(resp) => {
+                let cs = crate::scorer::score_tool_case(c, Some(&resp));
+                let exp = if cs.expected.is_empty() {
+                    "no tool".to_string()
+                } else {
+                    cs.expected.join(", ")
+                };
+                let got = if cs.called.is_empty() {
+                    "none".to_string()
+                } else {
+                    cs.called.join(", ")
+                };
+                (cs.tool_score, resp.latency_ms, format!("called [{got}] · expected [{exp}]"))
+            }
+            Err(e) => (0.0, 0, format!("error: {e}")),
+        };
+        tool_scores.push(score);
+        latencies.push(latency);
+        push_case(&jobs, &job_id, ScoredCase {
+            kind: "tool".to_string(),
+            case_id: c.id.clone(),
+            category: c.category.clone(),
+            prompt: c.prompt.clone(),
+            score,
+            latency_ms: latency,
+            detail,
+        });
+    }
+
+    // Memory cases (the same bundled LongMemEval questions over the seed user).
+    for mc in &mem_cases {
+        let expected = mc.answer_text();
+        let req = crate::protocol::RunRequest {
+            case_id: mc.question_id.clone(),
+            system_prompt: mem_sys.to_string(),
+            user_input: mc.query.clone(),
+            tools: catalog.clone(),
+        };
+        let (score, latency, detail) = match baseline.run(req).await {
+            Ok(resp) => {
+                let ok = crate::scorer::answer_matches(&resp.final_text, &expected);
+                (
+                    if ok { 1.0 } else { 0.0 },
+                    resp.latency_ms,
+                    format!("expected \"{expected}\" — {}", if ok { "found ✓" } else { "not found ✗" }),
+                )
+            }
+            Err(e) => (0.0, 0, format!("error: {e}")),
+        };
+        mem_scores.push(score);
+        latencies.push(latency);
+        push_case(&jobs, &job_id, ScoredCase {
+            kind: "memory".to_string(),
+            case_id: mc.question_id.clone(),
+            category: mc.question_type.clone(),
+            prompt: mc.query.clone(),
+            score,
+            latency_ms: latency,
+            detail,
+        });
+    }
+
+    let tool_mean = mean(&tool_scores);
+    let memory_mean = mean(&mem_scores);
+    let composite = if !tool_scores.is_empty() && !mem_scores.is_empty() {
+        0.6 * tool_mean + 0.4 * memory_mean
+    } else if !mem_scores.is_empty() {
+        memory_mean
+    } else {
+        tool_mean
+    };
+    let median = median_i64(&latencies);
+
+    let mut j = jobs.lock().expect("score_jobs lock");
+    if let Some(job) = j.get_mut(&job_id) {
+        job.status = "done".to_string();
+        job.tool_mean = tool_mean;
+        job.memory_mean = memory_mean;
+        job.composite = composite;
+        job.median_ms = median;
+    }
+}
+
+fn mean(v: &[f64]) -> f64 {
+    if v.is_empty() {
+        0.0
+    } else {
+        v.iter().sum::<f64>() / v.len() as f64
+    }
+}
+
+fn median_i64(v: &[i64]) -> i64 {
+    if v.is_empty() {
+        return 0;
+    }
+    let mut c = v.to_vec();
+    c.sort_unstable();
+    c[c.len() / 2]
 }
