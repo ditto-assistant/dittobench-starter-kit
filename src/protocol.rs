@@ -1,6 +1,6 @@
 //! DittoBench validator wire contract (HTTP).
 //!
-//! These JSON shapes are byte-compatible with the Go `dittobench-api`
+//! These JSON shapes are byte-compatible with the Go validator
 //! (`pkg/protocol/protocol.go`). The validator on Bittensor subnet 118 (SN118)
 //! POSTs a [`RunRequest`] to the miner's `/run` endpoint per case and expects a
 //! [`RunResponse`]. Datasets ([`Dataset`]) and score reports ([`ScoreReport`])

@@ -62,7 +62,7 @@ enum Command {
     /// Test a submission locally against a FIXED benchmark: the static seed
     /// user + the same bundled LongMemEval questions + a fixed-seed tool set,
     /// every run. Reproducible inputs so you can iterate on your score (vs the
-    /// hosted dittobench-api validator, which rotates a fresh dataset). Run
+    /// hosted validator, which rotates a fresh dataset). Run
     /// `seed-user` first.
     Evaluate {
         /// Number of (fixed-seed) tool cases.
@@ -312,7 +312,7 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
     let report = scorer::score(&format!("evaluate-seed{seed}"), &ds, &tool_resps, &mem_results);
     print_report(&report, &ds);
     eprintln!(
-        "\n(inputs are fixed; the model is still stochastic, so scores vary slightly run-to-run.\n the hosted dittobench-api validator rotates a fresh dataset per submission.)"
+        "\n(inputs are fixed; the model is still stochastic, so scores vary slightly run-to-run.\n the hosted validator rotates a fresh dataset per submission.)"
     );
     Ok(())
 }

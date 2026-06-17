@@ -1,7 +1,7 @@
 //! The Ditto tool catalog presented to harnesses. Each entry has a name, a
 //! short description, and a minimal JSON-schema parameter definition. This is
 //! the tool menu a harness sees on every `RunRequest` (mirrors the Go
-//! `dittobench-api` `internal/catalog`).
+//! validator's `internal/catalog`).
 
 use serde_json::{json, Value};
 

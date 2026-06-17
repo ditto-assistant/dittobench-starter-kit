@@ -1,6 +1,6 @@
 //! Turns harness `RunResponse`s into a DittoBench `ScoreReport`.
 //!
-//! Tool accuracy per case (mirrors the Go `dittobench-api` `internal/scorer`):
+//! Tool accuracy per case (mirrors the Go validator `internal/scorer`):
 //!   - matched = sum over expected tools of min(expected_count, observed_count)
 //!   - base    = matched / total_expected
 //!   - penalty = 0.1 per unexpected/extra call (skipped if allow_extra_tools)

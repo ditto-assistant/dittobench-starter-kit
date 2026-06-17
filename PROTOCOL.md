@@ -1,8 +1,7 @@
 # DittoBench wire protocol
 
-All shapes below are JSON with `snake_case` keys, byte-compatible with the Go
-`dittobench-api` (`pkg/protocol`). The Rust definitions live in
-[`src/protocol.rs`](src/protocol.rs).
+All shapes below are JSON with `snake_case` keys, matching the Go validator's
+wire contract. The Rust definitions live in [`src/protocol.rs`](src/protocol.rs).
 
 ## HTTP endpoints (your miner serves these)
 

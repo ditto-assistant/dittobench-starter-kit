@@ -47,8 +47,8 @@ realistic user out of the box.
 ## Quickstart
 
 > **New here? Read [`SETUP.md`](SETUP.md)** — the full, step-by-step guide for
-> setting up this kit together with `ditto-harness` (the crate dependency) and
-> `dittobench-api` (the validator), including git auth, Ollama, and `.env`.
+> setting up this kit with `ditto-harness` (the crate dependency), including git
+> auth, Ollama, and `.env`.
 
 ```bash
 # 1. Auth for the private harness dep (your git/ssh must have read access).
@@ -102,7 +102,7 @@ retrieval answer with `ditto://memory/…` citations).
 ### Local practice vs. the hosted validator
 
 - **`evaluate` (local, fixed):** scores your submission against the **same inputs every run** — the static seed user, the same bundled LongMemEval questions, and a fixed-seed tool set. Inputs are reproducible (the model itself is still stochastic), so it's the loop to **iterate on your score**.
-- **`dittobench-api` (hosted, coming soon):** the validator that rotates a **fresh random dataset per submission** (anti-overfit), mirroring how the on-chain SN118 validator will score you. `practice` reproduces that rotating behavior locally.
+- **Hosted validator (coming soon):** rotates a **fresh random dataset per submission** (anti-overfit), mirroring how the on-chain SN118 validator will score you. `practice` reproduces that rotating behavior locally.
 
 Use `evaluate` to develop; treat the rotating score as the real target.
 

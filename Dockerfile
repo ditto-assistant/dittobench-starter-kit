@@ -2,8 +2,7 @@
 #
 # NOTE ON GIT AUTH: ditto-harness is currently a PRIVATE git dependency, so the
 # build needs read access at `cargo build` time. This Dockerfile supports a
-# BuildKit `gh_token` secret (a GitHub token with read access). The
-# dittobench-api sandbox passes it automatically; to build by hand:
+# BuildKit `gh_token` secret (a GitHub token with read access). To build by hand:
 #
 #     printf '%s' "$(gh auth token)" > /tmp/gh_token
 #     DOCKER_BUILDKIT=1 docker build --secret id=gh_token,src=/tmp/gh_token -t dittobench-miner .

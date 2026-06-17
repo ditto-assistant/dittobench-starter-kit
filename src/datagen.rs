@@ -3,7 +3,7 @@
 //! Generation is deterministic per seed (a given seed always yields the same
 //! dataset) but varies widely across seeds. The practice loop rotates the seed
 //! on every run so no two evaluations are identical — the anti-overfit property
-//! of the off-chain practice loop. Mirrors the Go `dittobench-api`
+//! of the off-chain practice loop. Mirrors the Go validator
 //! `internal/datagen`, extended with synthetic memory cases.
 
 use chrono::Utc;

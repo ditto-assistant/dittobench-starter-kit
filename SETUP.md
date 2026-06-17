@@ -1,18 +1,21 @@
-# Setup — the three DittoBench repos, working together
+# Setup — the DittoBench starter kit
 
-This guide gets you from zero to **talking to the agent** and **scoring a harness**.
-There are three repos; you usually only touch the **starter kit**.
+This guide gets you from zero to **talking to the agent** and **scoring your harness locally**.
+You only work in the **starter kit**; it pulls the harness crate automatically.
 
 | Repo | What it is | You need it for |
 | --- | --- | --- |
-| [`dittobench-starter-kit`](https://github.com/ditto-assistant/dittobench-starter-kit) | **The miner harness you build + optimize** (this repo). Agent + memory + tools + playground. | Always — this is your entry point. |
+| [`dittobench-starter-kit`](https://github.com/ditto-assistant/dittobench-starter-kit) | **The miner harness you build + optimize** (this repo). Agent + memory + tools + playground + local scoring. | Always — this is your entry point. |
 | [`ditto-harness`](https://github.com/ditto-assistant/ditto-harness) | The shared Ditto agent + memory crate the kit depends on (Rust, on `main`). | Pulled automatically as a git dependency — you don't clone it. |
-| [`dittobench-api`](https://github.com/ditto-assistant/dittobench-api) | The off-chain **practice validator** (Go) that scores your harness, mirroring the on-chain flow. | Optional — only to score yourself like the subnet will. |
 
 ```
-dittobench-api  ──(POST /v1/submit)──►  dittobench-starter-kit (serve)  ──depends on──►  ditto-harness
-   (Go validator)                          (your Rust harness)                            (Rust crate, main)
+dittobench-starter-kit  ──depends on──►  ditto-harness
+   (your Rust harness)                    (Rust crate, main)
 ```
+
+You score yourself locally with the kit's built-in `evaluate` (fixed benchmark).
+A **hosted validator** that rotates a fresh dataset per submission — mirroring
+the on-chain flow — is coming soon.
 
 ---
 
@@ -33,7 +36,6 @@ dittobench-api  ──(POST /v1/submit)──►  dittobench-starter-kit (serve)
   ollama pull embeddinggemma          # needs Ollama >= 0.6
   ```
 - **An OpenRouter API key** — for the chat model (free local Ollama also works; see below).
-- **(Optional) Go 1.24+ and Docker** — only if you run `dittobench-api` (Docker only for its sandbox mode).
 
 ---
 
@@ -69,9 +71,9 @@ cargo run -- serve --port 8080   # expose POST /run + GET /health for the valida
 > **Local practice vs. the hosted validator.** Use **`evaluate`** to iterate: it
 > scores you against a *fixed* benchmark (static seed user + the same bundled
 > LongMemEval questions + a fixed-seed tool set) so your score is comparable
-> run-to-run. The hosted **`dittobench-api`** (coming soon) is the validator that
-> rotates a *fresh* dataset per submission — the anti-overfit target the on-chain
-> SN118 validator uses; `practice` reproduces that rotating behavior locally.
+> run-to-run. The **hosted validator** (coming soon) rotates a *fresh* dataset
+> per submission — the anti-overfit target the on-chain SN118 validator uses;
+> `practice` reproduces that rotating behavior locally.
 
 ### `.env` reference
 
@@ -87,35 +89,20 @@ Fully local (no API key): set `DITTOBENCH_PROVIDER=ollama` and `DITTOBENCH_MODEL
 
 ---
 
-## 2. dittobench-api — score your harness like the subnet (optional)
+## 2. Scoring like the subnet (coming soon)
 
-```bash
-git clone https://github.com/ditto-assistant/dittobench-api
-cd dittobench-api
-go run ./cmd/dittobench-api --port 8000   # GET /v1/dataset, /v1/catalog, POST /v1/submit, GET /v1/runs/{id}
-
-# Direct mode — you run your harness, the API scores it:
-#   terminal A:  (in the kit)  cargo run -- serve --port 8080
-#   terminal B:
-curl -X POST localhost:8000/v1/submit -H 'content-type: application/json' \
-  -d '{"harness_url":"http://localhost:8080","n":30}'
-
-# Sandbox mode — the API builds + runs your submission in Docker (closer to on-chain):
-export GITHUB_TOKEN_FILE=<(gh auth token)   # so the build can fetch the private ditto-harness dep
-curl -X POST localhost:8000/v1/submit -H 'content-type: application/json' \
-  -d '{"git_url":"https://github.com/<you>/<your-harness>","git_ref":"main","n":30,
-       "env":{"OPENROUTER_API_KEY":"sk-or-...","DITTOBENCH_MODEL":"openai/gpt-5.4-nano"}}'
-```
-
-See the api repo's `README.md` for the full endpoint + scoring docs.
+Today you score locally with `evaluate` (fixed benchmark) and `practice`
+(rotating random dataset). A **hosted validator** that scores a submitted
+harness against a fresh dataset per request — the same loop the on-chain SN118
+validator uses — is coming soon; details will land here when it's live.
 
 ---
 
-## 3. How the repos stay in sync
+## 3. How the harness stays in sync
 
 - The kit pins `ditto-harness` by **commit `rev`** in `Cargo.toml` (currently the `main` HEAD) for reproducible builds.
 - To pick up a newer harness: set `rev` to the new `ditto-harness` main commit, then `cargo update -p ditto-harness`.
-- The `dittobench-api` and the on-chain validator pin the **same** harness ref, so an off-chain practice score transfers to the subnet.
+- The hosted validator and the on-chain validator pin the **same** harness ref, so a local practice score transfers to the subnet.
 
 ## Troubleshooting
 
