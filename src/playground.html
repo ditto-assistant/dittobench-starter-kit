@@ -125,8 +125,8 @@
           <h3>How to read this</h3>
           <ul class="legend">
             <li><b>Composite</b> = 0.6 × tool score + 0.4 × memory score (the headline number).</li>
-            <li><b>Tool score</b> (per case): matched ÷ expected tools, −0.1 per extra call, clamped 0–1. A "no-tool" case scores 1.0 only if the agent called nothing.</li>
-            <li><b>Memory score</b> (per question): 1.0 if the expected answer appears in the reply (case-insensitive substring), else 0 — a fast local proxy for the on-chain LLM judge.</li>
+            <li><b>Tool score</b> (per case): <b>½ tool-accuracy + ½ response-quality judge</b> — tool-accuracy = matched ÷ expected tools (−0.1/extra; no-tool case = 1.0 if nothing called); the LLM judge rates the reply's helpfulness + accuracy. Mirrors the backend's DittoBench tool composite.</li>
+            <li><b>Memory score</b> (per question): an <b>LLM judge</b> (yes/no), the same LongMemEval QA judge the published scores used — not a substring match.</li>
             <li><b>Score colors:</b> <span class="dot good"></span> 1.0 · <span class="dot ok"></span> partial · <span class="dot bad"></span> 0.</li>
             <li>Inputs are fixed, but the model is stochastic — expect small run-to-run variation.</li>
           </ul>
