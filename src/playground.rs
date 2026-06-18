@@ -610,6 +610,7 @@ async fn run_scoring(
         }
     }
     let catalog = crate::catalog::catalog();
+    let judge = crate::judge::Judge::new(baseline.model_arc());
     let tool_sys = "You are Ditto, a helpful assistant. Use a tool when the user's request \
         clearly needs one; otherwise just answer.";
     let mem_sys = "You are Ditto. Answer using the user's memories when relevant; search \
@@ -630,17 +631,18 @@ async fn run_scoring(
         let (score, latency, detail) = match baseline.run(req).await {
             Ok(resp) => {
                 let cs = crate::scorer::score_tool_case(c, Some(&resp));
-                let exp = if cs.expected.is_empty() {
-                    "no tool".to_string()
-                } else {
-                    cs.expected.join(", ")
-                };
-                let got = if cs.called.is_empty() {
-                    "none".to_string()
-                } else {
-                    cs.called.join(", ")
-                };
-                (cs.tool_score, resp.latency_ms, format!("called [{got}] · expected [{exp}]"))
+                // composite = 0.5*tool-accuracy + 0.5*response-quality judge (backend rule).
+                let jq = judge
+                    .tool_response_quality(&c.prompt, &cs.called, &c.expected_behavior, &resp.final_text)
+                    .await;
+                let composite = 0.5 * cs.tool_score + 0.5 * jq;
+                let exp = if cs.expected.is_empty() { "no tool".to_string() } else { cs.expected.join(", ") };
+                let got = if cs.called.is_empty() { "none".to_string() } else { cs.called.join(", ") };
+                (
+                    composite,
+                    resp.latency_ms,
+                    format!("called [{got}] · expected [{exp}] · tool-acc {:.2}, response-judge {jq:.2}", cs.tool_score),
+                )
             }
             Err(e) => (0.0, 0, format!("error: {e}")),
         };
@@ -668,11 +670,14 @@ async fn run_scoring(
         };
         let (score, latency, detail) = match baseline.run(req).await {
             Ok(resp) => {
-                let ok = crate::scorer::answer_matches(&resp.final_text, &expected);
+                // LongMemEval QA judge (yes/no), like the backend — not substring.
+                let ok = judge
+                    .memory_correct(&mc.query, &expected, &resp.final_text, &mc.question_type, false)
+                    .await;
                 (
                     if ok { 1.0 } else { 0.0 },
                     resp.latency_ms,
-                    format!("expected \"{expected}\" — {}", if ok { "found ✓" } else { "not found ✗" }),
+                    format!("expected \"{expected}\" — judge: {}", if ok { "correct ✓" } else { "incorrect ✗" }),
                 )
             }
             Err(e) => (0.0, 0, format!("error: {e}")),

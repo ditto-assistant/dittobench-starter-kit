@@ -270,8 +270,16 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
         ds.memory_cases.len()
     );
 
-    // Tool cases.
+    // LLM judge (mirrors the backend DittoBench scorers).
+    let judge = dittobench_starter_kit::judge::Judge::new(baseline.model_arc());
+    let qtype_by_id: HashMap<String, String> = cases
+        .iter()
+        .map(|c| (c.question_id.clone(), c.question_type.clone()))
+        .collect();
+
+    // Tool cases: run + response-quality judge.
     let mut tool_resps: HashMap<String, protocol::RunResponse> = HashMap::new();
+    let mut tool_judge: HashMap<String, f64> = HashMap::new();
     for c in &ds.tool_cases {
         let req = protocol::RunRequest {
             case_id: c.id.clone(),
@@ -283,13 +291,18 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
         };
         match baseline.run(req).await {
             Ok(resp) => {
+                let called: Vec<String> = resp.tool_calls.iter().map(|t| t.name.clone()).collect();
+                let jq = judge
+                    .tool_response_quality(&c.prompt, &called, &c.expected_behavior, &resp.final_text)
+                    .await;
+                tool_judge.insert(c.id.clone(), jq);
                 tool_resps.insert(c.id.clone(), resp);
             }
             Err(err) => eprintln!("tool case {} failed: {err}", c.id),
         }
     }
 
-    // Memory questions (answered by the agent over the seeded user).
+    // Memory questions: run + LLM-judge correctness (like the backend QA judge).
     let mut mem_results: HashMap<String, (bool, i64)> = HashMap::new();
     for mc in &ds.memory_cases {
         let req = protocol::RunRequest {
@@ -302,14 +315,17 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
         };
         match baseline.run(req).await {
             Ok(resp) => {
-                let correct = scorer::answer_matches(&resp.final_text, &mc.expected_answer);
+                let qtype = qtype_by_id.get(&mc.id).map(String::as_str).unwrap_or("");
+                let correct = judge
+                    .memory_correct(&mc.question, &mc.expected_answer, &resp.final_text, qtype, false)
+                    .await;
                 mem_results.insert(mc.id.clone(), (correct, resp.latency_ms));
             }
             Err(err) => eprintln!("memory case {} failed: {err}", mc.id),
         }
     }
 
-    let report = scorer::score(&format!("evaluate-seed{seed}"), &ds, &tool_resps, &mem_results);
+    let report = scorer::score(&format!("evaluate-seed{seed}"), &ds, &tool_resps, &tool_judge, &mem_results);
     print_report(&report, &ds);
     eprintln!(
         "\n(inputs are fixed; the model is still stochastic, so scores vary slightly run-to-run.\n the hosted validator rotates a fresh dataset per submission.)"
@@ -347,8 +363,11 @@ async fn practice(n: usize, mem: usize, seed: Option<i64>) -> anyhow::Result<()>
         }
     }
 
-    // Tool cases.
+    let judge = dittobench_starter_kit::judge::Judge::new(baseline.model_arc());
+
+    // Tool cases: run + response-quality judge (backend composite).
     let mut tool_resps: HashMap<String, protocol::RunResponse> = HashMap::new();
+    let mut tool_judge: HashMap<String, f64> = HashMap::new();
     for c in &ds.tool_cases {
         let req = protocol::RunRequest {
             case_id: c.id.clone(),
@@ -360,13 +379,18 @@ async fn practice(n: usize, mem: usize, seed: Option<i64>) -> anyhow::Result<()>
         };
         match baseline.run(req).await {
             Ok(resp) => {
+                let called: Vec<String> = resp.tool_calls.iter().map(|t| t.name.clone()).collect();
+                let jq = judge
+                    .tool_response_quality(&c.prompt, &called, &c.expected_behavior, &resp.final_text)
+                    .await;
+                tool_judge.insert(c.id.clone(), jq);
                 tool_resps.insert(c.id.clone(), resp);
             }
             Err(err) => eprintln!("tool case {} failed: {err}", c.id),
         }
     }
 
-    // Memory cases.
+    // Memory cases: run + LLM-judge correctness.
     let mut mem_results: HashMap<String, (bool, i64)> = HashMap::new();
     for mc in &ds.memory_cases {
         let req = protocol::RunRequest {
@@ -378,14 +402,16 @@ async fn practice(n: usize, mem: usize, seed: Option<i64>) -> anyhow::Result<()>
         };
         match baseline.run(req).await {
             Ok(resp) => {
-                let correct = scorer::answer_matches(&resp.final_text, &mc.expected_answer);
+                let correct = judge
+                    .memory_correct(&mc.question, &mc.expected_answer, &resp.final_text, "", false)
+                    .await;
                 mem_results.insert(mc.id.clone(), (correct, resp.latency_ms));
             }
             Err(err) => eprintln!("memory case {} failed: {err}", mc.id),
         }
     }
 
-    let report = scorer::score(&format!("practice-{seed}"), &ds, &tool_resps, &mem_results);
+    let report = scorer::score(&format!("practice-{seed}"), &ds, &tool_resps, &tool_judge, &mem_results);
     print_report(&report, &ds);
     Ok(())
 }

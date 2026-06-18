@@ -1,21 +1,22 @@
 //! Turns harness `RunResponse`s into a DittoBench `ScoreReport`.
 //!
-//! Tool accuracy per case (mirrors the Go validator `internal/scorer`):
-//!   - matched = sum over expected tools of min(expected_count, observed_count)
-//!   - base    = matched / total_expected
-//!   - penalty = 0.1 per unexpected/extra call (skipped if allow_extra_tools)
-//!   - score   = clamp(base - penalty, 0, 1)
-//!   - cases with no expected tool score 1.0 iff the harness called nothing,
-//!     else 0.0 (a single unexpected call zeroes a no-tool case).
+//! Mirrors the Ditto backend DittoBench scorer that produced the published
+//! numbers (`backend/pkg/dittobench`):
 //!
-//! Memory accuracy (local-practice extension): a memory case counts as correct
-//! when the harness's `final_text` contains the case's `expected_answer` as a
-//! case-insensitive substring. This is a deterministic proxy so the offline
-//! loop needs no LLM judge.
+//! Tool composite (0–1) = **0.5 × tool-accuracy + 0.5 × response-quality judge**:
+//!   - tool-accuracy = `matched / total_expected`, −0.1 per extra/unexpected call
+//!     (skipped if `allow_extra_tools`), clamped 0–1; no-expected-tool cases score
+//!     1.0 for this half (Go: `computeToolAccuracy`, /50). This is the
+//!     deterministic [`score_tool_case`] below.
+//!   - response-quality = an LLM judge (helpfulness + accuracy, mean/5) over the
+//!     final text — supplied per case via the `tool_judge` map; see [`crate::judge`].
+//!     When absent (no judge run), only the deterministic half is used.
 //!
-//! NOTE: the on-chain SN118 validator uses an LLM judge for memory recall (and
-//! richer tool semantics). This local scorer is a fast, deterministic
-//! approximation for iterating — your real score will differ.
+//! Memory accuracy = an **LLM judge** verdict (yes/no), exactly like the backend
+//! LongMemEval QA judge — supplied here as the boolean in `mem_results`
+//! (see [`crate::judge::Judge::memory_correct`]). The earlier substring proxy
+//! over-scored short/numeric answers; the judge brings memory into the published
+//! ~0.5–0.7 band.
 
 use std::collections::HashMap;
 
@@ -36,6 +37,7 @@ pub fn score(
     run_id: &str,
     ds: &Dataset,
     tool_resps: &HashMap<String, RunResponse>,
+    tool_judge: &HashMap<String, f64>,
     mem_results: &HashMap<String, (bool, i64)>,
 ) -> ScoreReport {
     let mut per_case = Vec::with_capacity(ds.tool_cases.len() + ds.memory_cases.len());
@@ -44,7 +46,13 @@ pub fn score(
 
     for c in &ds.tool_cases {
         let resp = tool_resps.get(&c.id);
-        let cs = score_tool_case(c, resp);
+        let mut cs = score_tool_case(c, resp);
+        // Blend in the response-quality judge half when available (Go composite =
+        // 0.5*toolAccuracy + 0.5*judgeQuality). Without a judge, deterministic only.
+        if let Some(jq) = tool_judge.get(&c.id) {
+            cs.tool_score = 0.5 * cs.tool_score + 0.5 * jq;
+            cs.notes.push(format!("response-quality judge {jq:.2}"));
+        }
         tool_sum += cs.tool_score;
         latencies.push(cs.latency_ms);
         per_case.push(cs);
@@ -265,7 +273,7 @@ mod tests {
         };
         let mut m = HashMap::new();
         m.insert("a".to_string(), resp(&["search_web"], 100));
-        let r = score("run", &ds, &m, &HashMap::new());
+        let r = score("run", &ds, &m, &HashMap::new(), &HashMap::new());
         assert_eq!(r.tool_mean, 1.0);
         assert_eq!(r.composite, 1.0);
         assert_eq!(r.per_case[0].tool_score, 1.0);
@@ -279,7 +287,7 @@ mod tests {
         };
         let mut m = HashMap::new();
         m.insert("a".to_string(), resp(&["search_web", "create_image"], 0));
-        let r = score("run", &ds, &m, &HashMap::new());
+        let r = score("run", &ds, &m, &HashMap::new(), &HashMap::new());
         // base 1.0 - 0.1 extra = 0.9
         assert!((r.per_case[0].tool_score - 0.9).abs() < 1e-9);
     }
@@ -292,12 +300,12 @@ mod tests {
         };
         let mut m = HashMap::new();
         m.insert("a".to_string(), resp(&["search_web"], 0));
-        let r = score("run", &ds, &m, &HashMap::new());
+        let r = score("run", &ds, &m, &HashMap::new(), &HashMap::new());
         assert_eq!(r.per_case[0].tool_score, 0.0);
 
         let mut m2 = HashMap::new();
         m2.insert("a".to_string(), resp(&[], 0));
-        let r2 = score("run", &ds, &m2, &HashMap::new());
+        let r2 = score("run", &ds, &m2, &HashMap::new(), &HashMap::new());
         assert_eq!(r2.per_case[0].tool_score, 1.0);
     }
 
@@ -307,7 +315,7 @@ mod tests {
             tool_cases: vec![tool_case("a", &["search_web"], false)],
             ..Dataset::default()
         };
-        let r = score("run", &ds, &HashMap::new(), &HashMap::new());
+        let r = score("run", &ds, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(r.per_case[0].tool_score, 0.0);
         assert!(!r.per_case[0].notes.is_empty());
     }
@@ -326,7 +334,7 @@ mod tests {
         m.insert("a".to_string(), resp(&["t"], 10));
         m.insert("b".to_string(), resp(&["t"], 30));
         m.insert("c".to_string(), resp(&["t"], 20));
-        let r = score("run", &ds, &m, &HashMap::new());
+        let r = score("run", &ds, &m, &HashMap::new(), &HashMap::new());
         assert_eq!(r.median_ms, 20);
     }
 
@@ -346,7 +354,7 @@ mod tests {
         tool.insert("a".to_string(), resp(&["search_web"], 0)); // tool_mean = 1.0
         let mut mem = HashMap::new();
         mem.insert("m1".to_string(), (false, 5)); // memory_mean = 0.0
-        let r = score("run", &ds, &tool, &mem);
+        let r = score("run", &ds, &tool, &HashMap::new(), &mem);
         assert_eq!(r.tool_mean, 1.0);
         assert_eq!(r.memory_mean, 0.0);
         assert!((r.composite - 0.6).abs() < 1e-9, "composite = {}", r.composite);
