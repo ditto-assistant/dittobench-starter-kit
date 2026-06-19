@@ -431,6 +431,11 @@ pub struct ScoreJob {
 /// Config for proxying submissions to dittobench-api (resolved from env at
 /// startup). The playground backend makes the outbound call so the browser
 /// never has to (avoids CORS).
+///
+/// INTERNAL ONLY: the "Submit to dittobench-api" tab + these proxy routes
+/// target the *private* hosted validator and exist for the Ditto team to
+/// dev-test it. Miners can ignore this path entirely and score their harness
+/// with the `evaluate` / `practice` CLI commands instead.
 #[derive(Clone)]
 struct SubmitConfig {
     /// Base URL of dittobench-api, e.g. `http://localhost:8000`.

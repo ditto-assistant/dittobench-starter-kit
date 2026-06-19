@@ -80,6 +80,8 @@
   ul.legend{margin:0;padding-left:18px;font-size:12px;color:var(--soft);line-height:1.5}
   ul.legend .dot{margin:0 2px}
   /* submit tab */
+  .internal-banner{border:1px solid #d9b24a;background:#fbf3da;color:#6b5616;border-radius:10px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.45}
+  .internal-banner b{color:#5a4710}
   .submit-controls{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
   .seg-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
@@ -157,6 +159,7 @@
         </div>
       </div>
       <div id="view-submit" class="hide">
+        <div class="internal-banner">🔒 <b>Internal only.</b> This tab talks to the private <code>dittobench-api</code> and is for the Ditto team to dev-test the hosted validator. <b>Miners can ignore it</b> — use <code>evaluate</code> / <code>practice</code> from the CLI to score your harness.</div>
         <div class="score-intro">Submit to the <b>hosted validator</b> (dittobench-api). It generates a <b>fresh anti-cheat dataset</b> (paraphrased tool cases + a freshly assembled LongMemEval haystack), seeds the haystack into your harness, runs every tool + memory case, and scores them with an LLM judge. Watch the stages stream in realtime below.</div>
         <div class="submit-controls">
           <label class="seg-label">size</label>
