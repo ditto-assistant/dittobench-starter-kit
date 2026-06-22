@@ -159,7 +159,7 @@
         </div>
       </div>
       <div id="view-submit" class="hide">
-        <div class="internal-banner">🔒 <b>Internal only.</b> This tab talks to the private <code>dittobench-api</code> and is for the Ditto team to dev-test the hosted validator. <b>Miners can ignore it</b> — use <code>evaluate</code> / <code>practice</code> from the CLI to score your harness.</div>
+        <div class="internal-banner">🔑 <b>BYOK practice.</b> This submits to the <b>official hosted validator</b> for off-chain practice. Your <code>OPENROUTER_API_KEY</code> (from <code>.env</code>) is forwarded per request for the generator + judge — the validator stores no keys. The validator must be able to reach your harness, so expose it (e.g. <code>ngrok http 9000</code>) and set <code>DITTOBENCH_HARNESS_URL</code>. <i>Pointing <code>DITTOBENCH_API_URL</code> at a localhost api is internal-dev only.</i></div>
         <div class="score-intro">Submit to the <b>hosted validator</b> (dittobench-api). It generates a <b>fresh anti-cheat dataset</b> (paraphrased tool cases + a freshly assembled LongMemEval haystack), seeds the haystack into your harness, runs every tool + memory case, and scores them with an LLM judge. Watch the stages stream in realtime below.</div>
         <div class="submit-controls">
           <label class="seg-label">size</label>

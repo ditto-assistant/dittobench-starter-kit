@@ -430,12 +430,11 @@ pub struct ScoreJob {
 
 /// Config for proxying submissions to dittobench-api (resolved from env at
 /// startup). The playground backend makes the outbound call so the browser
-/// never has to (avoids CORS).
+/// never has to (avoids CORS), and attaches the BYOK OpenRouter key.
 ///
-/// INTERNAL ONLY: the "Submit to dittobench-api" tab + these proxy routes
-/// target the *private* hosted validator and exist for the Ditto team to
-/// dev-test it. Miners can ignore this path entirely and score their harness
-/// with the `evaluate` / `practice` CLI commands instead.
+/// By default this targets the **official hosted practice validator** (BYOK) so
+/// miners can score against a fresh anti-cheat dataset. Pointing
+/// `DITTOBENCH_API_URL` at a localhost api is internal dev only.
 #[derive(Clone)]
 struct SubmitConfig {
     /// Base URL of dittobench-api, e.g. `http://localhost:8000`.
@@ -454,8 +453,11 @@ struct SubmitConfig {
 impl SubmitConfig {
     fn from_env() -> Self {
         SubmitConfig {
-            api_url: std::env::var("DITTOBENCH_API_URL")
-                .unwrap_or_else(|_| "http://localhost:8000".to_string()),
+            api_url: std::env::var("DITTOBENCH_API_URL").unwrap_or_else(|_| {
+                // Official hosted practice validator (BYOK). Override with
+                // DITTOBENCH_API_URL=http://localhost:8000 for internal dev.
+                "https://dittobench-api-22790208601.us-central1.run.app".to_string()
+            }),
             git_url: std::env::var("DITTOBENCH_CRATE_GIT").unwrap_or_else(|_| {
                 "https://github.com/ditto-assistant/dittobench-starter-kit".to_string()
             }),
@@ -794,7 +796,10 @@ async fn submit_start_handler(
         _ => "small".to_string(),
     };
     let url = format!("{}/v1/submit", state.submit.api_url.trim_end_matches('/'));
-    let body = if req.target == "crate" {
+    // BYOK: forward the miner's OpenRouter key (from env) so the hosted validator
+    // can run the generator + judge. The key never touches the browser.
+    let key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    let mut body = if req.target == "crate" {
         json!({
             "git_url": state.submit.git_url,
             "git_ref": state.submit.git_ref,
@@ -806,6 +811,9 @@ async fn submit_start_handler(
             "run_size": run_size,
         })
     };
+    if !key.is_empty() {
+        body["openrouter_key"] = json!(key);
+    }
     match state.http.post(&url).json(&body).send().await {
         Ok(resp) => relay_json(resp).await,
         Err(err) => (
