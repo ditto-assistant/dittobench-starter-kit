@@ -1,7 +1,7 @@
 //! DittoBench miner CLI.
 //!
 //! Subcommands:
-//!   serve     — HTTP server exposing POST /run + GET /health (validator faces this)
+//!   serve     — HTTP server exposing POST /run + POST /seed + GET /health (validator faces this)
 //!   seed      — load the bundled memory fixture into the local Turso DB
 //!   practice  — run a local dataset through the baseline and print a score report
 //!   submit    — package the repo for submission (real upload is a TODO stub)
@@ -33,7 +33,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run the HTTP harness server (POST /run, GET /health).
+    /// Run the HTTP harness server (POST /run, POST /seed, GET /health).
     Serve {
         #[arg(long, default_value_t = 8080)]
         port: u16,
@@ -122,13 +122,14 @@ async fn serve(port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/run", post(run_handler))
+        .route("/seed", post(seed_handler))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("bind {addr}"))?;
-    eprintln!("dittobench-miner serving on http://{addr} (POST /run, GET /health)");
+    eprintln!("dittobench-miner serving on http://{addr} (POST /run, POST /seed, GET /health)");
     axum::serve(listener, app).await.context("axum serve")?;
     Ok(())
 }
@@ -142,6 +143,24 @@ async fn run_handler(
     Json(req): Json<protocol::RunRequest>,
 ) -> impl IntoResponse {
     match state.baseline.run(req).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": err.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /seed` — install a FRESH memory haystack into the harness Turso store
+/// before the validator asks memory questions. Loads the provided pairs +
+/// subjects + links via the same `save_memory` path as the bundled seed user
+/// (idempotent upserts). Returns the counts that were loaded.
+async fn seed_handler(
+    State(state): State<AppState>,
+    Json(req): Json<dittobench_starter_kit::seed::SeedRequest>,
+) -> impl IntoResponse {
+    match dittobench_starter_kit::seed::seed_from_request(state.baseline.store(), req).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,

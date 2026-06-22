@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use ditto_harness::memory::{SaveMemoryRequest, Store, SubjectInput};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::baseline::USER_ID;
 
@@ -24,28 +24,28 @@ const LINKS_JSON: &str = include_str!("../fixtures/seed-user/subject_links.json"
 const MEMORY_CASES_JSON: &str = include_str!("../fixtures/seed-user/memory_cases.json");
 
 #[derive(Deserialize)]
-struct Pair {
-    pair_id: String,
+pub struct Pair {
+    pub pair_id: String,
     #[serde(default)]
-    session_id: String,
+    pub session_id: String,
     #[serde(default)]
-    timestamp: String,
-    prompt: String,
-    response: String,
+    pub timestamp: String,
+    pub prompt: String,
+    pub response: String,
 }
 
 #[derive(Deserialize)]
-struct Subject {
-    id: String,
-    subject_text: String,
+pub struct Subject {
+    pub id: String,
+    pub subject_text: String,
     #[serde(default)]
-    description_text: String,
+    pub description_text: String,
 }
 
 #[derive(Deserialize)]
-struct Link {
-    subject_id: String,
-    pair_id: String,
+pub struct Link {
+    pub subject_id: String,
+    pub pair_id: String,
 }
 
 /// A LongMemEval memory question for the practice run.
@@ -95,11 +95,26 @@ pub async fn load_seed_user(store: &Store) -> anyhow::Result<SeedStats> {
     let pairs: Vec<Pair> = serde_json::from_str(PAIRS_JSON)?;
     let subjects: Vec<Subject> = serde_json::from_str(SUBJECTS_JSON)?;
     let links: Vec<Link> = serde_json::from_str(LINKS_JSON)?;
+    load_haystack(store, USER_ID, &pairs, &subjects, &links, true).await
+}
 
+/// Shared loader used by both the bundled seed user and the `/seed` endpoint.
+/// Saves each pair via `save_memory` (embedding `prompt\nresponse`) with the
+/// subjects linked to it, so embeddings + the subject graph are rebuilt. The
+/// save path upserts on `(user, pair_id)` and `(user, kg, subject_text)`, so
+/// re-seeding a haystack refreshes rather than duplicates (idempotent).
+async fn load_haystack(
+    store: &Store,
+    user_id: &str,
+    pairs: &[Pair],
+    subjects: &[Subject],
+    links: &[Link],
+    log_progress: bool,
+) -> anyhow::Result<SeedStats> {
     let subj_by_id: HashMap<&str, &Subject> =
         subjects.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut subs_by_pair: HashMap<&str, Vec<&Subject>> = HashMap::new();
-    for l in &links {
+    for l in links {
         if let Some(s) = subj_by_id.get(l.subject_id.as_str()) {
             subs_by_pair.entry(l.pair_id.as_str()).or_default().push(s);
         }
@@ -125,7 +140,7 @@ pub async fn load_seed_user(store: &Store) -> anyhow::Result<SeedStats> {
 
         store
             .save_memory(SaveMemoryRequest {
-                user_id: USER_ID.to_string(),
+                user_id: user_id.to_string(),
                 id: p.pair_id.clone(),
                 session_id: p.session_id.clone(),
                 prompt: p.prompt.clone(),
@@ -138,7 +153,7 @@ pub async fn load_seed_user(store: &Store) -> anyhow::Result<SeedStats> {
             .await
             .map_err(|e| anyhow::anyhow!("save_memory {}: {e}", p.pair_id))?;
 
-        if (i + 1) % 50 == 0 || i + 1 == total {
+        if log_progress && ((i + 1) % 50 == 0 || i + 1 == total) {
             eprintln!("  seeded {}/{} pairs", i + 1, total);
         }
     }
@@ -147,5 +162,52 @@ pub async fn load_seed_user(store: &Store) -> anyhow::Result<SeedStats> {
         pairs: total,
         subjects: subjects.len(),
         links: links.len(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// `/seed` endpoint wire contract — a fresh memory haystack pushed by the
+// validator before it asks memory questions.
+// ---------------------------------------------------------------------------
+
+/// Request body for the harness `POST /seed` route (snake_case). The validator
+/// sends a fresh haystack: conversation pairs, the subjects, and the
+/// subject↔pair links. `user_id` defaults to the kit [`USER_ID`].
+#[derive(Deserialize)]
+pub struct SeedRequest {
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub pairs: Vec<Pair>,
+    #[serde(default)]
+    pub subjects: Vec<Subject>,
+    #[serde(default)]
+    pub links: Vec<Link>,
+}
+
+/// Response body for `POST /seed`.
+#[derive(Serialize)]
+pub struct SeedResponse {
+    pub pairs: usize,
+    pub subjects: usize,
+    pub links: usize,
+}
+
+/// Loads a validator-provided haystack into `store`. Reuses the same
+/// `save_memory` path as [`load_seed_user`] (per pair, with its linked
+/// subjects), so embeddings + the subject graph are built and the operation is
+/// idempotent (upserts). The validator calls this to install a FRESH haystack
+/// before asking memory questions.
+pub async fn seed_from_request(store: &Store, req: SeedRequest) -> anyhow::Result<SeedResponse> {
+    let user_id = req
+        .user_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(USER_ID);
+    let stats = load_haystack(store, user_id, &req.pairs, &req.subjects, &req.links, false).await?;
+    Ok(SeedResponse {
+        pairs: stats.pairs,
+        subjects: stats.subjects,
+        links: stats.links,
     })
 }

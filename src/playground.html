@@ -79,6 +79,31 @@
   .dot.good{background:var(--green)} .dot.ok{background:var(--brass)} .dot.bad{background:#b4564f}
   ul.legend{margin:0;padding-left:18px;font-size:12px;color:var(--soft);line-height:1.5}
   ul.legend .dot{margin:0 2px}
+  /* submit tab */
+  .internal-banner{border:1px solid #d9b24a;background:#fbf3da;color:#6b5616;border-radius:10px;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.45}
+  .internal-banner b{color:#5a4710}
+  .submit-controls{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .seg-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+  .seg button{border:none;background:transparent;padding:7px 14px;font:inherit;font-size:12px;font-weight:600;color:var(--soft);cursor:pointer;border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:none}
+  .seg button.active{background:var(--brass);color:#fff}
+  #sub-run{padding:7px 16px;border:none;border-radius:9px;background:var(--brass);color:#fff;font-weight:600;cursor:pointer}
+  #sub-run:disabled{opacity:.55;cursor:default}
+  .stages{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .stage{font-size:11px;font-family:var(--mono);padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--faint);background:#fff;display:flex;align-items:center;gap:5px}
+  .stage.done{color:var(--green);border-color:var(--green)}
+  .stage.active{color:#fff;background:var(--brass);border-color:var(--brass)}
+  .stage .tick{font-size:10px}
+  #sub-report{display:flex;align-items:center;gap:18px;background:#fff;border:1px solid var(--brass);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  #sub-chart{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  #sub-chart h3{margin:0 0 8px}
+  .chart-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11.5px}
+  .chart-row .clbl{width:120px;font-family:var(--mono);color:var(--soft);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chart-row .ctrack{flex:1;height:14px;background:var(--paper2);border-radius:4px;overflow:hidden}
+  .chart-row .cbar{height:100%;background:var(--brass);border-radius:4px}
+  .chart-row .cbar.mem{background:var(--green)}
+  .chart-row .cval{width:34px;font-family:var(--mono);color:var(--ink);text-align:right}
 </style>
 </head>
 <body>
@@ -101,6 +126,7 @@
       <button id="tab-tools" class="active" onclick="showTab('tools')">Tools</button>
       <button id="tab-trace" onclick="showTab('trace')">Last turn</button>
       <button id="tab-score" onclick="showTab('score')">Score</button>
+      <button id="tab-submit" onclick="showTab('submit')">Submit</button>
     </div>
     <div class="body">
       <div id="view-tools"></div>
@@ -132,6 +158,35 @@
           </ul>
         </div>
       </div>
+      <div id="view-submit" class="hide">
+        <div class="internal-banner">🔑 <b>BYOK practice.</b> This submits to the <b>official hosted validator</b> for off-chain practice. Your <code>OPENROUTER_API_KEY</code> (from <code>.env</code>) is forwarded per request for the generator + judge — the validator stores no keys. The validator must be able to reach your harness, so expose it (e.g. <code>ngrok http 9000</code>) and set <code>DITTOBENCH_HARNESS_URL</code>. <i>Pointing <code>DITTOBENCH_API_URL</code> at a localhost api is internal-dev only.</i></div>
+        <div class="score-intro">Submit to the <b>hosted validator</b> (dittobench-api). It generates a <b>fresh anti-cheat dataset</b> (paraphrased tool cases + a freshly assembled LongMemEval haystack), seeds the haystack into your harness, runs every tool + memory case, and scores them with an LLM judge. Watch the stages stream in realtime below.</div>
+        <div class="submit-controls">
+          <label class="seg-label">size</label>
+          <div class="seg" id="sub-size">
+            <button data-size="small" class="active">small</button>
+            <button data-size="medium">medium</button>
+            <button data-size="full">full</button>
+          </div>
+          <label class="seg-label">target</label>
+          <div class="seg" id="sub-target">
+            <button data-target="local" class="active">local harness</button>
+            <button data-target="crate">crate build</button>
+          </div>
+          <button id="sub-run">Submit to validator</button>
+        </div>
+        <div class="score-intro" id="sub-target-note" style="margin-top:-4px">
+          <b>local harness</b>: validator runs against your already-running <code>serve</code> harness (skips the Docker build — fast). <b>crate build</b>: validator clones + builds this crate's git ref in Docker (the real SN118 flow).
+        </div>
+        <div id="sub-progress" class="hide">
+          <div class="stages" id="sub-stages"></div>
+          <div class="bar"><div id="sub-bar" class="fill"></div></div>
+          <div id="sub-status" class="score-status"></div>
+        </div>
+        <div id="sub-report" class="hide"></div>
+        <div id="sub-chart" class="hide"></div>
+        <div id="sub-cases"></div>
+      </div>
     </div>
   </aside>
 </main>
@@ -141,7 +196,7 @@ const esc = s => (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&
 const j = o => esc(JSON.stringify(o,null,2));
 
 function showTab(t){
-  for(const k of ['tools','trace','score']){
+  for(const k of ['tools','trace','score','submit']){
     document.getElementById('view-'+k).classList.toggle('hide',t!==k);
     document.getElementById('tab-'+k).classList.toggle('active',t===k);
   }
@@ -245,6 +300,120 @@ async function runScore(){
   btn.disabled=false; btn.textContent='Run scoring';
 }
 document.getElementById('sc-run').onclick=runScore;
+
+// ---- submit to dittobench-api ----
+// 'crate' builds in Docker (building stage); 'local' targets a running harness.
+const STAGES_CRATE=['building','generating','seeding','running','scoring','done'];
+const STAGES_LOCAL=['generating','seeding','running','scoring','done'];
+let subSize='small', subTarget='local';
+function curStages(){ return subTarget==='crate'?STAGES_CRATE:STAGES_LOCAL; }
+document.querySelectorAll('#sub-size button').forEach(b=>{
+  b.onclick=()=>{
+    subSize=b.dataset.size;
+    document.querySelectorAll('#sub-size button').forEach(x=>x.classList.toggle('active',x===b));
+  };
+});
+document.querySelectorAll('#sub-target button').forEach(b=>{
+  b.onclick=()=>{
+    subTarget=b.dataset.target;
+    document.querySelectorAll('#sub-target button').forEach(x=>x.classList.toggle('active',x===b));
+  };
+});
+function renderStages(stage){
+  const STAGES=curStages();
+  const idx=Math.max(0,STAGES.indexOf(stage));
+  document.getElementById('sub-stages').innerHTML=STAGES.map((s,i)=>{
+    const cls=i<idx?'done':(i===idx?'active':'');
+    const tick=i<idx?'<span class="tick">✓</span>':'';
+    return `<span class="stage ${cls}">${tick}${esc(s)}</span>`;
+  }).join('');
+}
+function renderSubCases(cases){
+  document.getElementById('sub-cases').innerHTML=(cases||[]).map(c=>`
+    <div class="sc-case">
+      <span class="dot ${scoreCls(c.score)}"></span>
+      <span class="sc-score">${(c.score!=null?c.score:0).toFixed(2)}</span>
+      <span class="sc-kind ${esc(c.kind)}">${esc(c.kind)}</span>
+      <span class="sc-cat">${esc(c.category)}</span>
+      <span class="sc-lat">${c.latency_ms!=null?c.latency_ms+' ms':''}</span>
+      <div class="sc-prompt">${esc(c.case_id||c.id||'')}</div>
+    </div>`).join('');
+}
+// Hand-rolled inline-SVG-free bar chart of per-category means + tool vs memory.
+function renderReport(rep){
+  const r=document.getElementById('sub-report');
+  r.classList.remove('hide');
+  const f=x=>(x!=null?x:0);
+  r.innerHTML=`
+    <div class="sc-headline"><div class="big">${f(rep.composite).toFixed(3)}</div><div class="lbl">composite</div></div>
+    <div class="sc-metrics">
+      <div><b>${f(rep.tool_mean).toFixed(3)}</b><span>tool</span></div>
+      <div><b>${f(rep.memory_mean).toFixed(3)}</b><span>memory</span></div>
+      <div><b>${rep.median_ms!=null?rep.median_ms:(rep.median!=null?rep.median:0)}</b><span>median ms</span></div>
+    </div>`;
+  // chart: tool vs memory, plus per-category means if present.
+  const rows=[
+    {label:'tool',val:f(rep.tool_mean),mem:false},
+    {label:'memory',val:f(rep.memory_mean),mem:true},
+  ];
+  const cats=rep.by_category||rep.categories||null;
+  if(cats){
+    for(const k of Object.keys(cats)){
+      const v=cats[k]; rows.push({label:k,val:typeof v==='number'?v:f(v&&v.mean),mem:false});
+    }
+  }
+  const c=document.getElementById('sub-chart');
+  c.classList.remove('hide');
+  c.innerHTML='<h3>Scores</h3>'+rows.map(row=>{
+    const pct=Math.round(100*Math.max(0,Math.min(1,row.val)));
+    return `<div class="chart-row">
+      <span class="clbl">${esc(row.label)}</span>
+      <span class="ctrack"><span class="cbar ${row.mem?'mem':''}" style="width:${pct}%"></span></span>
+      <span class="cval">${row.val.toFixed(2)}</span>
+    </div>`;
+  }).join('');
+}
+async function runSubmit(){
+  const btn=document.getElementById('sub-run');
+  btn.disabled=true; btn.textContent='Submitting…';
+  document.getElementById('sub-report').classList.add('hide');
+  document.getElementById('sub-chart').classList.add('hide');
+  document.getElementById('sub-cases').innerHTML='';
+  document.getElementById('sub-progress').classList.remove('hide');
+  renderStages(curStages()[0]);
+  document.getElementById('sub-status').textContent='submitting to validator…';
+  try{
+    const r=await fetch('/api/submit',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({run_size:subSize,target:subTarget})});
+    const start=await r.json();
+    if(start.error){ document.getElementById('sub-status').textContent='⚠ '+start.error; btn.disabled=false; btn.textContent='Submit to validator'; return; }
+    const runId=start.run_id||start.id;
+    if(!runId){ document.getElementById('sub-status').textContent='⚠ no run_id in response'; btn.disabled=false; btn.textContent='Submit to validator'; return; }
+    while(true){
+      await new Promise(s=>setTimeout(s,1000));
+      const run=await (await fetch('/api/submit/'+encodeURIComponent(runId))).json();
+      if(run.error){ document.getElementById('sub-status').textContent='⚠ '+run.error; break; }
+      const stage=run.stage||run.status||'running';
+      renderStages(stage);
+      const prog=run.progress||{};
+      const done=prog.done!=null?prog.done:0, total=prog.total!=null?prog.total:0;
+      const pct=total?Math.round(100*done/total):(stage==='done'?100:0);
+      document.getElementById('sub-bar').style.width=pct+'%';
+      document.getElementById('sub-status').textContent=
+        (stage==='done')?`done · run ${esc(runId)}`:`${esc(stage)} · ${done}/${total}`;
+      renderSubCases(run.partial);
+      if(stage==='done'||run.status==='done'||run.status==='completed'){
+        if(run.report) renderReport(run.report); else renderReport(run);
+        break;
+      }
+      if(run.status==='error'||run.status==='failed'){
+        document.getElementById('sub-status').textContent='⚠ '+(run.error||'run failed'); break;
+      }
+    }
+  }catch(e){ document.getElementById('sub-status').textContent='⚠ '+e; }
+  btn.disabled=false; btn.textContent='Submit to validator';
+}
+document.getElementById('sub-run').onclick=runSubmit;
 
 loadTools();
 </script>
