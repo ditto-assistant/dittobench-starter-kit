@@ -164,8 +164,57 @@ the exact production stack, use Vertex `text-embedding-005` + the production
 cargo run -- submit   # packages dittobench-submission.tgz + prints next steps
 ```
 
-Real signed upload to the SN118 subnet is a documented TODO stub — wire it to
-your registered hotkey and the subnet `/upload/*` endpoints.
+### What you submit — the whole crate, not one file
+
+`submit` runs `tar -czf dittobench-submission.tgz .` (excluding `target/`,
+`*.db`, `*.tgz`, `.git`). You submit the **entire buildable project**, with the
+`Dockerfile` at the tarball root:
+
+- `Dockerfile`, `Cargo.toml`, `Cargo.lock`
+- `src/` — including your edited `baseline.rs` **and** the `dittobench-miner` server
+- `fixtures/` — the ONNX models + seed data your harness loads at runtime
+
+You are **not** submitting `src/baseline.rs` on its own, and you are **not**
+submitting `ditto-harness` — that's a pinned git dependency your crate builds
+*on top of* (the build fetches it; see the `gh_token` secret in the `Dockerfile`).
+
+### The fixed interface — don't break these
+
+The validator **builds your tarball in Docker and runs the resulting container**,
+then scores it. A submission is only valid if it keeps this contract intact:
+
+| Must hold | Why |
+| --- | --- |
+| A `Dockerfile` at the tarball root | It's the validator's Docker build context. |
+| `docker build` succeeds | A pre-screen gate rejects submissions that don't build. |
+| The image serves `GET /health`, `POST /seed`, `POST /run` on **:8080** | The validator drives your harness over these (see [`PROTOCOL.md`](PROTOCOL.md)). |
+| `POST /run` returns a well-formed `RunResponse` | The scorer grades `tool_calls` + `final_text`; a malformed body scores 0. |
+
+Restructure the crate however you like — as long as `docker build .` still
+produces a container serving that protocol on :8080.
+
+### What you're free to change — everything inside the contract
+
+Everything else is yours: `baseline.rs` (model, system prompt, retrieval knobs,
+tools — see *How to optimize* above), any other `src/` file, added crate
+dependencies, your own `fixtures/models/` weights, even the `Dockerfile` build
+steps. **The score is won inside the contract, not by changing it.**
+
+### How it's evaluated on-chain
+
+1. You upload the tarball to the subnet `/upload/*` endpoints — this pays the
+   eval fee; the platform verifies the payment + the tarball's SHA-256 and stores it.
+2. A **screener** builds your crate as a cheap gate (`uploaded → evaluating`, or
+   `screening_failed` if it doesn't build).
+3. A **validator** hands the scoring engine your tarball; it builds + runs your
+   container against a **fresh, seeded, anti-cheat dataset** — you can't see or
+   pin the seed, it rotates every run — scores it with an LLM judge, and sets
+   weights on chain. The on-chain profile is **`run_size=full`**; the local
+   `practice` scorer is a fast deterministic proxy (no LLM judge), so your real
+   score will differ.
+
+Real signed upload from this kit is still a TODO stub — wire `submit` to your
+registered hotkey and the subnet `/upload/*` endpoints.
 
 ## Don't waste your time
 
