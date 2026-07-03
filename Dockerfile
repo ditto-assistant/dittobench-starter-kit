@@ -13,10 +13,12 @@
 # CARGO_NET_GIT_FETCH_WITH_CLI=true makes cargo use the system git (which honors
 # the credential rewrite below) instead of its built-in fetcher.
 
-# rust:1-bookworm tracks the latest stable 1.x — the harness dep tree needs
+# rust:1-trixie tracks the latest stable 1.x — the harness dep tree needs
 # edition2024 (Rust >= 1.85), and the kit doesn't pin a Cargo.lock, so floating
 # to latest stable avoids "feature edition2024 not stabilized" build breaks.
-FROM rust:1-bookworm AS builder
+# trixie (glibc 2.41), not bookworm (2.36): ort/onnxruntime prebuilt objects
+# reference __isoc23_strtol (glibc >= 2.38), which fails to link on bookworm.
+FROM rust:1-trixie AS builder
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 WORKDIR /app
 
@@ -34,7 +36,10 @@ RUN --mount=type=secret,id=gh_token \
     cargo build --release --bin dittobench-miner
 
 # --- runtime ---------------------------------------------------------------
-FROM debian:bookworm-slim AS runtime
+# trixie (glibc 2.41) to match the builder: ort/onnxruntime's prebuilt objects
+# reference __isoc23_strtol (glibc >= 2.38), which bookworm (2.36) lacks, so a
+# bookworm builder/runtime fails to link. Keep both stages on the same release.
+FROM debian:trixie-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
