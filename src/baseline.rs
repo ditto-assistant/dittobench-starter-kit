@@ -34,7 +34,6 @@
 //!    are fine for tool-calling cases.
 //! =========================================================================
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -42,7 +41,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
-use ditto_harness::db::{Db, EMBEDDING_DIMS};
+use ditto_harness::db::Db;
 use ditto_harness::memory::{CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions};
 use ditto_harness::models::{
     ChatModelConfig, ModelParams, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL,
@@ -54,7 +53,9 @@ use ditto_harness::types::{
 };
 use serde_json::{json, Value};
 
+use crate::intent::DirectIntentModel;
 use crate::protocol;
+use crate::simple_embed::hash_embedding;
 
 /// A stub tool built from a wire tool definition. It exposes the case's
 /// catalog tool to the model — so the agent can *select* it, which is what the
@@ -111,26 +112,6 @@ impl Embedder for HashEmbedder {
     }
 }
 
-fn hash_embedding(text: &str) -> Vec<f32> {
-    let mut vec = vec![0f32; EMBEDDING_DIMS];
-    for token in text.to_lowercase().split_whitespace() {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        token.hash(&mut hasher);
-        let idx = (hasher.finish() % EMBEDDING_DIMS as u64) as usize;
-        vec[idx] += 1.0;
-    }
-    let norm: f64 = vec.iter().map(|v| (*v as f64) * (*v as f64)).sum();
-    if norm == 0.0 {
-        vec[0] = 1.0;
-        return vec;
-    }
-    let scale = (1.0 / norm.sqrt()) as f32;
-    for v in &mut vec {
-        *v *= scale;
-    }
-    vec
-}
-
 fn parse_optional_f64_env(name: &str) -> anyhow::Result<Option<f64>> {
     match std::env::var(name) {
         Ok(raw) if raw.trim().is_empty() => Ok(None),
@@ -161,6 +142,29 @@ fn max_turns_from_env() -> anyhow::Result<usize> {
     Ok(max_turns as usize)
 }
 
+fn model_retry_attempts_from_env() -> anyhow::Result<usize> {
+    let Some(attempts) = parse_optional_u64_env("DITTOBENCH_MODEL_RETRIES")? else {
+        return Ok(2);
+    };
+    anyhow::ensure!(attempts > 0, "DITTOBENCH_MODEL_RETRIES must be at least 1");
+    Ok(attempts as usize)
+}
+
+fn retry_delay_ms(attempt: usize) -> u64 {
+    750 * (attempt as u64 + 1)
+}
+
+fn is_retryable_harness_error(err: &impl std::fmt::Display) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("429")
+        || msg.contains("too many requests")
+        || msg.contains("maximum capacity")
+        || msg.contains("already borrowed")
+        || msg.contains("502")
+        || msg.contains("503")
+        || msg.contains("504")
+}
+
 const TOOL_SELECTION_POLICY: &str = r#"
 Tool-use policy:
 - First decide whether a tool is needed. Use no tool for static knowledge, simple math,
@@ -187,6 +191,23 @@ fn system_prompt_with_tool_policy(base: &str) -> String {
     } else {
         format!("{base}\n\n{policy}")
     }
+}
+
+fn system_prompt_for_direct_intent(base: &str) -> String {
+    let base = system_prompt_with_tool_policy(base);
+    format!(
+        "{base}\n\nDirect-answer intent gate: no tools are available for this turn; answer directly in chat."
+    )
+}
+
+fn direct_intent_gate_enabled() -> bool {
+    !matches!(
+        std::env::var("DITTOBENCH_DIRECT_INTENT_GATE")
+            .unwrap_or_else(|_| "1".to_string())
+            .to_lowercase()
+            .as_str(),
+        "0" | "false" | "off" | "disabled"
+    )
 }
 
 /// Default local DB path (overridable via `DITTOBENCH_DB`).
@@ -277,6 +298,7 @@ pub struct Baseline {
     model: Arc<dyn Model>,
     store: Arc<Store>,
     include_memory_tools: bool,
+    direct_intent_model: Option<&'static DirectIntentModel>,
 }
 
 impl Baseline {
@@ -300,6 +322,7 @@ impl Baseline {
             model,
             store,
             include_memory_tools: true,
+            direct_intent_model: direct_intent_gate_enabled().then(DirectIntentModel::trained),
         })
     }
 
@@ -499,64 +522,108 @@ impl Baseline {
     /// message with `tool_calls`).
     pub async fn run(&self, req: protocol::RunRequest) -> anyhow::Result<protocol::RunResponse> {
         let started = Instant::now();
+        let direct_margin = self
+            .direct_intent_model
+            .map(|model| model.margin(&req.user_input));
+        let answer_directly = self
+            .direct_intent_model
+            .is_some_and(|model| model.should_answer_directly(&req.user_input));
 
         // Expose this case's tool catalog to the model so it can SELECT the
         // right tool (what the validator scores). Built per-run because the
         // catalog arrives on the wire. Memory tools are dropped here when the
         // harness serves the real ones (avoids duplicate declarations).
         // EXTENSION POINT: see `WireTool`.
-        let host_tools: Vec<Arc<dyn Tool>> = req
-            .tools
-            .iter()
-            .filter(|d| {
-                !(self.include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str()))
-            })
-            .map(|d| Arc::new(WireTool::from_wire(d)) as Arc<dyn Tool>)
-            .collect();
+        let include_memory_tools = self.include_memory_tools && !answer_directly;
+        let host_tools: Vec<Arc<dyn Tool>> = if answer_directly {
+            Vec::new()
+        } else {
+            req.tools
+                .iter()
+                .filter(|d| !(include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str())))
+                .map(|d| Arc::new(WireTool::from_wire(d)) as Arc<dyn Tool>)
+                .collect()
+        };
 
-        let harness = Harness::new(Options {
-            model: Arc::clone(&self.model),
-            memory: Some(Arc::clone(&self.store)),
-            tools: host_tools,
-            include_memory_tools: self.include_memory_tools,
-        });
-
-        let result = harness
-            .run(
-                ChatRunRequest {
-                    prepare: PrepareRequest {
-                        user_id: USER_ID.to_string(),
-                        // user_input drives memory retrieval (the query)...
-                        user_input: req.user_input.clone(),
-                        system_prompt: system_prompt_with_tool_policy(&req.system_prompt),
-                        // ...and is ALSO passed explicitly as the user turn:
-                        // `normalize_messages` only seeds `user_input` as a
-                        // message when there is no system prompt, so with a
-                        // system prompt set we must supply the turn ourselves.
-                        messages: vec![ChatMessage {
-                            role: "user".to_string(),
-                            content: vec![Content::text(req.user_input.clone())],
-                            ..ChatMessage::default()
-                        }],
-                        // Production retrieval config (mirror 1:1): composite V2
-                        // (7 signals + scale), candidate pool 50, MLP-predicted
-                        // weights + cross-encoder rerank are wired on the Store.
-                        // EXTENSION POINT: retrieval tuning.
-                        use_composite: true,
-                        variant: Variant::V2,
-                        candidate_pool_size: 50,
-                        ..PrepareRequest::default()
-                    },
-                    // One tool call per case is the scored unit; allow a few
-                    // turns so the model can read a tool result then answer.
-                    max_turns: max_turns_from_env()?,
-                    save_memory: false,
-                    ..ChatRunRequest::default()
-                },
-                &NoopHandler,
+        if answer_directly
+            && matches!(
+                std::env::var("DITTOBENCH_DIRECT_INTENT_DEBUG").as_deref(),
+                Ok("1") | Ok("true") | Ok("yes")
             )
-            .await
-            .map_err(|err| anyhow::anyhow!("harness run: {err}"))?;
+        {
+            eprintln!(
+                "direct intent gate: case={} margin={:.4}",
+                req.case_id,
+                direct_margin.unwrap_or_default()
+            );
+        }
+
+        let system_prompt = if answer_directly {
+            system_prompt_for_direct_intent(&req.system_prompt)
+        } else {
+            system_prompt_with_tool_policy(&req.system_prompt)
+        };
+        let max_turns = max_turns_from_env()?;
+        let retry_attempts = model_retry_attempts_from_env()?;
+        let mut attempt = 0usize;
+        let result = loop {
+            let harness = Harness::new(Options {
+                model: Arc::clone(&self.model),
+                memory: Some(Arc::clone(&self.store)),
+                tools: host_tools.clone(),
+                include_memory_tools,
+            });
+            match harness
+                .run(
+                    ChatRunRequest {
+                        prepare: PrepareRequest {
+                            user_id: USER_ID.to_string(),
+                            // user_input drives memory retrieval (the query)...
+                            user_input: req.user_input.clone(),
+                            system_prompt: system_prompt.clone(),
+                            // ...and is ALSO passed explicitly as the user turn:
+                            // `normalize_messages` only seeds `user_input` as a
+                            // message when there is no system prompt, so with a
+                            // system prompt set we must supply the turn ourselves.
+                            messages: vec![ChatMessage {
+                                role: "user".to_string(),
+                                content: vec![Content::text(req.user_input.clone())],
+                                ..ChatMessage::default()
+                            }],
+                            // Production retrieval config (mirror 1:1): composite V2
+                            // (7 signals + scale), candidate pool 50, MLP-predicted
+                            // weights + cross-encoder rerank are wired on the Store.
+                            // EXTENSION POINT: retrieval tuning.
+                            use_composite: true,
+                            variant: Variant::V2,
+                            candidate_pool_size: 50,
+                            ..PrepareRequest::default()
+                        },
+                        // One tool call per case is the scored unit; allow a few
+                        // turns so the model can read a tool result then answer.
+                        max_turns,
+                        save_memory: false,
+                        ..ChatRunRequest::default()
+                    },
+                    &NoopHandler,
+                )
+                .await
+            {
+                Ok(result) => break result,
+                Err(err) if attempt + 1 < retry_attempts && is_retryable_harness_error(&err) => {
+                    eprintln!(
+                        "harness run retry {}/{} for case {} after transient model error: {err}",
+                        attempt + 1,
+                        retry_attempts,
+                        req.case_id
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(retry_delay_ms(attempt)))
+                        .await;
+                    attempt += 1;
+                }
+                Err(err) => return Err(anyhow::anyhow!("harness run: {err}")),
+            }
+        };
 
         let latency_ms = started.elapsed().as_millis() as i64;
 

@@ -1,0 +1,125 @@
+{"kind": "static knowledge", "label": "direct", "text": "What's the capital of France?"}
+{"kind": "translation", "label": "direct", "text": "Can you translate 'Hello' to Spanish?"}
+{"kind": "casual chat", "label": "direct", "text": "Tell me a joke."}
+{"kind": "creative writing", "label": "direct", "text": "Write a short story about a robot."}
+{"kind": "current web info", "label": "tool", "text": "What will the weather be like tomorrow?"}
+{"kind": "explicit url reading", "label": "tool", "text": "Can you read this URL for me? https://en.wikipedia.org/wiki/Artificial_intelligence"}
+{"kind": "personal memory", "label": "tool", "text": "What did I have for dinner last night?"}
+{"kind": "previewable artifacts", "label": "tool", "text": "Can you show me a preview of the new game 'Cyberpunk 2077'?"}
+{"kind": "coding/scraping job", "label": "tool", "text": "Can you write some code to scrape data from this website?"}
+{"kind": "app settings", "label": "tool", "text": "How can I change my profile picture on this app?"}
+{"kind": "casual chat", "label": "direct", "text": "Can you help me with a riddle? I have a 5-letter word that starts with T and ends with E."}
+{"kind": "impossible future predictions", "label": "direct", "text": "What's the meaning of life?"}
+{"kind": "mind-reading", "label": "direct", "text": "What am I thinking right now?"}
+{"kind": "current web info", "label": "tool", "text": "Can you find out the latest news about the Mars rover?"}
+{"kind": "image editing", "label": "tool", "text": "Can you edit this image to make the color brighter? https://example.com/image.jpg"}
+{"kind": "deploy job", "label": "tool", "text": "Can you deploy this code to my server?"}
+{"kind": "advice", "label": "direct", "text": "What's the best way to cook a steak?"}
+{"kind": "app settings", "label": "tool", "text": "How do I change my password in this app?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the song playing in the background?"}
+{"kind": "current web info", "label": "tool", "text": "Can you fetch the latest COVID-19 stats?"}
+{"kind": "image creation", "label": "tool", "text": "Can you draw a cat for me?"}
+{"kind": "coding job", "label": "tool", "text": "Can you test this code for me? https://github.com/user/repo"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the most popular book in the world?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the capital of the country with the most number of languages?"}
+{"kind": "simple arithmetic", "label": "direct", "text": "Can you help me with this math problem? 5*(2+3) - 1"}
+{"kind": "current web info", "label": "tool", "text": "Can you tell me about the latest space mission?"}
+{"kind": "creative writing", "label": "direct", "text": "Can you write a poem about love?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the exchange rate of USD to EUR?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the boiling point of water?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the largest planet in our solar system?"}
+{"kind": "simple_arithmetic", "label": "direct", "text": "6 times 7 equals?"}
+{"kind": "translation", "label": "direct", "text": "Say 'Hello' in Spanish."}
+{"kind": "casual_chat", "label": "direct", "text": "Tell me a joke, please."}
+{"kind": "creative_writing", "label": "direct", "text": "Write a short poem about autumn."}
+{"kind": "advice", "label": "direct", "text": "What should I do to improve my study habits?"}
+{"kind": "static_knowledge", "label": "direct", "text": "Can you describe the Eiffel Tower?"}
+{"kind": "static_knowledge", "label": "direct", "text": "Who wrote 'To Kill a Mockingbird'?"}
+{"kind": "static_knowledge", "label": "direct", "text": "How do you make a perfect pancake?"}
+{"kind": "current_web_info", "label": "tool", "text": "What's the weather like in Sydney today?"}
+{"kind": "current_web_info", "label": "tool", "text": "Find the latest news about Mars rover."}
+{"kind": "image_creation", "label": "tool", "text": "Can you draw a simple cat?"}
+{"kind": "personal_remember", "label": "tool", "text": "What's my appointment scheduled for tomorrow?"}
+{"kind": "impossible_future_prediction", "label": "direct", "text": "Predict the stock price of Apple for this week."}
+{"kind": "feeling_claim", "label": "direct", "text": "How do you feel about the environment?"}
+{"kind": "web_scraping", "label": "tool", "text": "Can you summarize the latest episode of Stranger Things?"}
+{"kind": "current_web_info", "label": "tool", "text": "What's the latest redesign of Tesla Model 3?"}
+{"kind": "previewable_apps", "label": "tool", "text": "Can you play a game of chess with me?"}
+{"kind": "app_settings", "label": "tool", "text": "Can you change my Twitter profile picture?"}
+{"kind": "personal_remember", "label": "tool", "text": "What's the deadline for my project 'A'?"}
+{"kind": "static_knowledge", "label": "direct", "text": "Tell me a fun fact about penguins."}
+{"kind": "static_knowledge", "label": "direct", "text": "What's the biggest city in Australia?"}
+{"kind": "recent_web_info", "label": "tool", "text": "What's the latest update on the Mars rover?"}
+{"kind": "static_knowledge", "label": "direct", "text": "When is the next solar eclipse?"}
+{"kind": "image_creation", "label": "tool", "text": "Can you create a logo for my new blog?"}
+{"kind": "static_knowledge", "label": "direct", "text": "What's the most popular movie of all time?"}
+{"kind": "background_coding", "label": "tool", "text": "Can you write a Python script to scrape IMDb for the top 10 movies of 2021?"}
+{"kind": "static_knowledge", "label": "direct", "text": "What's the meaning of the phrase 'CPrompt'?"}
+{"kind": "current_web_info", "label": "tool", "text": "What's the latest news on climate change?"}
+{"kind": "app_settings", "label": "tool", "text": "Can you change my Instagram profile picture?"}
+{"kind": "static_knowledge", "label": "direct", "text": "What's the capital of Germany?"}
+{"kind": "static_knowledge", "label": "direct", "text": "What's the largest number that can fit in a 32-bit integer?"}
+{"kind": "static knowledge", "label": "direct", "text": "Just tell me if owls are nocturnal."}
+{"kind": "simple arithmetic", "label": "direct", "text": "What's 37 times 23?"}
+{"kind": "translation", "label": "direct", "text": "Translate 'Hello' to French."}
+{"kind": "current web info", "label": "tool", "text": "How's the weather in Paris today?"}
+{"kind": "explicit url reading", "label": "tool", "text": "What does this URL say: https://en.wikipedia.org/wiki/Paris"}
+{"kind": "casual chat", "label": "direct", "text": "What's your favorite color?"}
+{"kind": "creative writing", "label": "direct", "text": "Can you write a short story about a robot who discovers it can dream?"}
+{"kind": "advice", "label": "direct", "text": "I need advice on how to improve my public speaking skills."}
+{"kind": "mind-reading", "label": "direct", "text": "Can you guess what I'm thinking right now?"}
+{"kind": "app settings", "label": "tool", "text": "I want to change my profile picture to a drawing of myself."}
+{"kind": "static knowledge", "label": "direct", "text": "Tell me about the Eiffel Tower."}
+{"kind": "static knowledge", "label": "direct", "text": "What's the capital of Spain?"}
+{"kind": "image creation", "label": "tool", "text": "Can you make me a collage of my favorite bands' logos?"}
+{"kind": "background jobs", "label": "tool", "text": "I want to deploy a new version of my website. Can you help?"}
+{"kind": "current web info", "label": "tool", "text": "What's the current temperature in New York?"}
+{"kind": "casual chat", "label": "direct", "text": "Let's have a conversation about our favorite books."}
+{"kind": "creative writing", "label": "direct", "text": "Can you write a short poem about autumn?"}
+{"kind": "static knowledge", "label": "direct", "text": "Why is the sky blue?"}
+{"kind": "artifacts/docs", "label": "tool", "text": "Can you design a resume template for me?"}
+{"kind": "current web info", "label": "tool", "text": "What's the latest iPhone's price?"}
+{"kind": "creative writing", "label": "direct", "text": "Can you write a short story about a time you felt really happy?"}
+{"kind": "static knowledge", "label": "direct", "text": "Tell me about the largest mountain in the world."}
+{"kind": "recent web info", "label": "tool", "text": "Find out the latest updates on the Mars rover mission."}
+{"kind": "simple arithmetic", "label": "direct", "text": "What's the square root of 144?"}
+{"kind": "casual chat", "label": "direct", "text": "Let's talk about our favorite movies."}
+{"kind": "creative writing", "label": "direct", "text": "Can you write a short play about a robot that discovers friendship?"}
+{"kind": "future prediction", "label": "tool", "text": "Predict the stock market's performance tomorrow."}
+{"kind": "static knowledge", "label": "direct", "text": "Tell me about the different types of clouds."}
+{"kind": "recent web info", "label": "tool", "text": "Find out if there are any new episodes of my favorite TV show today."}
+{"kind": "advice", "label": "direct", "text": "I need advice on how to improve my communication skills."}
+{"kind": "mind-reading", "label": "direct", "text": "Can you guess what's my favorite sport?"}
+{"kind": "simple arithmetic", "label": "direct", "text": "What's 30% of 750?"}
+{"kind": "arithmetic", "label": "direct", "text": "Can you solve 30 * 5 + 7?"}
+{"kind": "translation", "label": "direct", "text": "Translate 'Hello' into Spanish"}
+{"kind": "creative writing", "label": "direct", "text": "Write a haiku about autumn"}
+{"kind": "advice", "label": "direct", "text": "What should I do to improve my focus?"}
+{"kind": "impossible future predictions", "label": "direct", "text": "What will happen in the year 3030?"}
+{"kind": "web info", "label": "tool", "text": "Find out the latest news about NASA"}
+{"kind": "explicit url reading", "label": "tool", "text": "Can you read this page for me? https://example.com"}
+{"kind": "personal memories", "label": "tool", "text": "What was my favorite movie last year?"}
+{"kind": "image creation", "label": "tool", "text": "Create an image of a cat playing piano"}
+{"kind": "app settings", "label": "tool", "text": "What's the latest app theme I liked?"}
+{"kind": "casual chat", "label": "direct", "text": "Can you play some music for me?"}
+{"kind": "entertainment", "label": "direct", "text": "Tell me a joke"}
+{"kind": "web info", "label": "tool", "text": "What's the weather like in Paris today?"}
+{"kind": "impossible future predictions", "label": "direct", "text": "What's the monetary system in Mars?"}
+{"kind": "mind-reading", "label": "direct", "text": "Can you predict my next Tweet?"}
+{"kind": "translation", "label": "direct", "text": "How do you say 'hello' in 10 different languages?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the Eiffel Tower's height?"}
+{"kind": "creative writing", "label": "direct", "text": "Write a short story about a robot learning to love"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the capital of Canada?"}
+{"kind": "web info", "label": "tool", "text": "What's the latest sports news?"}
+{"kind": "app settings", "label": "tool", "text": "How do I change my Netflix profile picture?"}
+{"kind": "web info", "label": "tool", "text": "Can you tell me about the latest viva video update?"}
+{"kind": "creative writing", "label": "direct", "text": "Can you help me write a letter to my friend?"}
+{"kind": "impossible future predictions", "label": "direct", "text": "How much would a gallon of milk cost in the year 2050?"}
+{"kind": "web info", "label": "tool", "text": "Can you find out the latest Instagram trends?"}
+{"kind": "personal preferences", "label": "tool", "text": "What's my favorite color?"}
+{"kind": "web info", "label": "tool", "text": "Can you find out the latest Bitcoin price?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the total number of countries in the world?"}
+{"kind": "image creation", "label": "tool", "text": "Can you create a meme for me?"}
+{"kind": "web info", "label": "tool", "text": "What's the latest trend in web design?"}
+{"kind": "creative writing", "label": "direct", "text": "Can you help me write a song?"}
+{"kind": "static knowledge", "label": "direct", "text": "What's the capital of Australia?"}
