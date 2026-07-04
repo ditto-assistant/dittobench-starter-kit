@@ -161,6 +161,34 @@ fn max_turns_from_env() -> anyhow::Result<usize> {
     Ok(max_turns as usize)
 }
 
+const TOOL_SELECTION_POLICY: &str = r#"
+Tool-use policy:
+- First decide whether a tool is needed. Use no tool for static knowledge, simple math,
+  translation, writing or brainstorming, casual conversation, personal advice, unknowable
+  future events, or claims that require mind reading or feelings.
+- If a tool is needed, call exactly one tool: the one whose description best matches the
+  user's intent. Prefer answering without a tool over speculative tool use.
+- Use read_links for explicit URLs or pages the user asks you to read.
+- Use search_web for current, recent, public, or open-ended web information.
+- Use search_memories for the user's past statements, preferences, plans, or decisions.
+  Use search_subjects only when the user asks which memory topics or subjects exist.
+- Use create_image for image generation or drawing requests.
+- Use artifacts for previewable or editable apps, games, documents, pages, and reports.
+- Use execute_agent_job for repo work, tests, code execution, scraping, deployment, or
+  other background work that must actually run outside this chat turn.
+- Use set_theme only for changing the app theme or display mode.
+"#;
+
+fn system_prompt_with_tool_policy(base: &str) -> String {
+    let base = base.trim();
+    let policy = TOOL_SELECTION_POLICY.trim();
+    if base.is_empty() {
+        policy.to_string()
+    } else {
+        format!("{base}\n\n{policy}")
+    }
+}
+
 /// Default local DB path (overridable via `DITTOBENCH_DB`).
 pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
 /// Chutes OpenAI-compatible inference endpoint.
@@ -500,7 +528,7 @@ impl Baseline {
                         user_id: USER_ID.to_string(),
                         // user_input drives memory retrieval (the query)...
                         user_input: req.user_input.clone(),
-                        system_prompt: req.system_prompt.clone(),
+                        system_prompt: system_prompt_with_tool_policy(&req.system_prompt),
                         // ...and is ALSO passed explicitly as the user turn:
                         // `normalize_messages` only seeds `user_input` as a
                         // message when there is no system prompt, so with a

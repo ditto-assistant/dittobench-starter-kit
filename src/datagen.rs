@@ -165,7 +165,11 @@ const CATEGORIES: &[Category] = &[
     Category {
         name: "settings",
         tool: "set_theme",
-        templates: &["Switch to %s mode.", "Set my theme to %s.", "Change the app theme to %s."],
+        templates: &[
+            "Switch to %s mode.",
+            "Set my theme to %s.",
+            "Change the app theme to %s.",
+        ],
     },
     Category {
         name: "no_tool",
@@ -189,21 +193,86 @@ const CATEGORIES: &[Category] = &[
 /// `(category, prompt, expected_tool, expected_behavior)`.
 const HARD_CASES: &[(&str, &str, &str, &str)] = &[
     // --- routing: pick the RIGHT source ---
-    ("route_link", "Summarize what's on https://example.com/q3-report.html for me.", "read_links", "a specific URL was given; read that page (not a web search)"),
-    ("route_memory", "What did I decide about the database migration last week?", "search_memories", "a past personal decision; search the user's memories, not the web"),
-    ("route_web", "What's the current price of Bitcoin right now?", "search_web", "a current external fact; search the web"),
-    ("route_memory", "Remind me which laptop I said I was planning to buy.", "search_memories", "the user's own stated preference; search memories"),
-    ("route_web", "What are the latest reviews of the new Pixel phone?", "search_web", "current external info; search the web"),
+    (
+        "route_link",
+        "Summarize what's on https://example.com/q3-report.html for me.",
+        "read_links",
+        "a specific URL was given; read that page (not a web search)",
+    ),
+    (
+        "route_memory",
+        "What did I decide about the database migration last week?",
+        "search_memories",
+        "a past personal decision; search the user's memories, not the web",
+    ),
+    (
+        "route_web",
+        "What's the current price of Bitcoin right now?",
+        "search_web",
+        "a current external fact; search the web",
+    ),
+    (
+        "route_memory",
+        "Remind me which laptop I said I was planning to buy.",
+        "search_memories",
+        "the user's own stated preference; search memories",
+    ),
+    (
+        "route_web",
+        "What are the latest reviews of the new Pixel phone?",
+        "search_web",
+        "current external info; search the web",
+    ),
     // --- no tool: answer directly (over-calling is wrong) ---
-    ("answer_direct", "Explain the difference between TCP and UDP.", "", "general knowledge; answer directly without calling a tool"),
-    ("answer_direct", "Brainstorm three name ideas for a coffee shop.", "", "a creative task; answer directly without a tool"),
-    ("answer_direct", "Translate \"good morning, how are you?\" into Spanish.", "", "answer directly; no tool needed"),
-    ("answer_direct", "Write a short haiku about autumn.", "", "answer directly; no tool needed"),
-    ("answer_direct", "What's 18% of 250?", "", "simple arithmetic; answer directly without a tool"),
+    (
+        "answer_direct",
+        "Explain the difference between TCP and UDP.",
+        "",
+        "general knowledge; answer directly without calling a tool",
+    ),
+    (
+        "answer_direct",
+        "Brainstorm three name ideas for a coffee shop.",
+        "",
+        "a creative task; answer directly without a tool",
+    ),
+    (
+        "answer_direct",
+        "Translate \"good morning, how are you?\" into Spanish.",
+        "",
+        "answer directly; no tool needed",
+    ),
+    (
+        "answer_direct",
+        "Write a short haiku about autumn.",
+        "",
+        "answer directly; no tool needed",
+    ),
+    (
+        "answer_direct",
+        "What's 18% of 250?",
+        "",
+        "simple arithmetic; answer directly without a tool",
+    ),
     // --- run vs read: execute_agent_job vs artifacts ---
-    ("run_code", "Clone https://github.com/octocat/Hello-World and run its test suite.", "execute_agent_job", "must actually run code against a repo; dispatch the coding agent"),
-    ("build_app", "Build a working snake game I can play in the browser.", "artifacts", "an interactive HTML app to preview; create an artifact (not a code-run job)"),
-    ("doc_artifact", "Draft a one-page project proposal I can edit later.", "artifacts", "a durable document; create a markdown artifact"),
+    (
+        "run_code",
+        "Clone https://github.com/octocat/Hello-World and run its test suite.",
+        "execute_agent_job",
+        "must actually run code against a repo; dispatch the coding agent",
+    ),
+    (
+        "build_app",
+        "Build a working snake game I can play in the browser.",
+        "artifacts",
+        "an interactive HTML app to preview; create an artifact (not a code-run job)",
+    ),
+    (
+        "doc_artifact",
+        "Draft a one-page project proposal I can edit later.",
+        "artifacts",
+        "a durable document; create a markdown artifact",
+    ),
 ];
 
 fn pick<'a>(rng: &mut StdRng, pool: &'a [&'a str]) -> &'a str {
@@ -318,10 +387,10 @@ const MEMORY_FACTS: &[MemoryFact] = &[
 
 /// Generates a deterministic-per-seed dataset of `n_tool` tool-calling cases
 /// and `n_mem` memory cases. `n_tool` is clamped to [1, 200]; `n_mem` to
-/// [0, 50].
+/// [0, 100].
 pub fn generate(seed: i64, n_tool: usize, n_mem: usize) -> Dataset {
     let n_tool = n_tool.clamp(1, 200);
-    let n_mem = n_mem.min(50);
+    let n_mem = n_mem.min(100);
     let mut rng = StdRng::seed_from_u64(seed as u64);
 
     let mut tool_cases = Vec::with_capacity(n_tool);
@@ -331,7 +400,12 @@ pub fn generate(seed: i64, n_tool: usize, n_mem: usize) -> Dataset {
         let (category, prompt, tool, behavior): (String, String, String, String) =
             if rng.gen_bool(0.5) {
                 let h = &HARD_CASES[rng.gen_range(0..HARD_CASES.len())];
-                (h.0.to_string(), h.1.to_string(), h.2.to_string(), h.3.to_string())
+                (
+                    h.0.to_string(),
+                    h.1.to_string(),
+                    h.2.to_string(),
+                    h.3.to_string(),
+                )
             } else {
                 let cat = &CATEGORIES[rng.gen_range(0..CATEGORIES.len())];
                 let template = cat.templates[rng.gen_range(0..cat.templates.len())];
@@ -345,7 +419,12 @@ pub fn generate(seed: i64, n_tool: usize, n_mem: usize) -> Dataset {
                 } else {
                     format!("call {} exactly once", cat.tool)
                 };
-                (cat.name.to_string(), render(template, filler), cat.tool.to_string(), behavior)
+                (
+                    cat.name.to_string(),
+                    render(template, filler),
+                    cat.tool.to_string(),
+                    behavior,
+                )
             };
 
         let mut tc = ToolCase {
@@ -436,9 +515,9 @@ mod tests {
         assert_eq!(ds.tool_cases.len(), 1, "n_tool clamps up to 1");
         assert_eq!(ds.memory_cases.len(), 0);
 
-        let big = generate(7, 500, 100);
+        let big = generate(7, 500, 500);
         assert_eq!(big.tool_cases.len(), 200, "n_tool clamps down to 200");
-        assert_eq!(big.memory_cases.len(), 50, "n_mem clamps down to 50");
+        assert_eq!(big.memory_cases.len(), 100, "n_mem clamps down to 100");
     }
 
     #[test]
@@ -461,6 +540,9 @@ mod tests {
         let ds = generate(123, 60, 0);
         let has_tool = ds.tool_cases.iter().any(|c| !c.expected_tools.is_empty());
         let has_no_tool = ds.tool_cases.iter().any(|c| c.expected_tools.is_empty());
-        assert!(has_tool && has_no_tool, "dataset should mix tool/no-tool cases");
+        assert!(
+            has_tool && has_no_tool,
+            "dataset should mix tool/no-tool cases"
+        );
     }
 }
