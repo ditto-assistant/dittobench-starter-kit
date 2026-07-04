@@ -79,13 +79,19 @@ cargo run -- serve --port 8080   # expose POST /run + GET /health for the valida
 
 ```ini
 OPENROUTER_API_KEY=sk-or-v1-...          # chat model key
-DITTOBENCH_PROVIDER=openrouter           # or `ollama` to run the chat model locally (free)
-DITTOBENCH_MODEL=google/gemini-3.1-flash-lite   # prod default; any OpenRouter/Ollama model id
+DITTOBENCH_PROVIDER=openrouter           # or `ollama`, `vllm`, `chutes`
+DITTOBENCH_MODEL=google/gemini-3.1-flash-lite   # prod default; provider model id
 OLLAMA_BASE_URL=http://localhost:11434   # embeddings (and ollama chat) endpoint
 DITTOBENCH_DB=./dittobench.db            # local Turso DB; keep the same path across seed-user + commands
 ```
 
 Fully local (no API key): set `DITTOBENCH_PROVIDER=ollama` and `DITTOBENCH_MODEL=qwen2.5:7b`.
+Chutes hosted inference: set `DITTOBENCH_PROVIDER=chutes`, `CHUTES_API_KEY=cpk_...`,
+and `DITTOBENCH_MODEL=deepseek-ai/DeepSeek-V3.2-TEE`. That DeepSeek ID is the
+current Chutes catalog entry; override it if Chutes publishes a literal
+DeepSeek V4 Flash model ID. Use `DITTOBENCH_MAX_TOKENS=256` for a faster
+practice loop with hosted reasoning models, and `DITTOBENCH_MAX_TURNS=1` when
+you only need tool-selection scoring.
 
 ---
 

@@ -62,6 +62,11 @@ export OPENROUTER_API_KEY=sk-or-...
 # export DITTOBENCH_PROVIDER=ollama
 # export DITTOBENCH_MODEL=qwen2.5:7b
 
+#    ...or use Chutes hosted OpenAI-compatible inference:
+# export DITTOBENCH_PROVIDER=chutes
+# export CHUTES_API_KEY=cpk_...
+# export DITTOBENCH_MODEL=deepseek-ai/DeepSeek-V3.2-TEE
+
 # 3. Embeddings use Ollama's embeddinggemma (768-dim) by default. For memory
 #    cases you need it running locally:
 #       ollama serve
@@ -125,7 +130,7 @@ calls, token usage, latency). Full shapes in [`PROTOCOL.md`](PROTOCOL.md).
 
 Everything you tune lives in **`src/baseline.rs`**, marked `EXTENSION POINT`:
 
-1. **Model choice** — swap the OpenRouter model id, or go local with
+1. **Model choice** — swap the OpenRouter model id, use Chutes, or go local with
    Ollama/vLLM. The single biggest lever on both accuracy and latency.
 2. **System prompt** — augment the per-case prompt with a tool-use policy and
    abstention rules so the agent picks the right tool (and *no* tool when it

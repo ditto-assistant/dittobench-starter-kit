@@ -3,7 +3,7 @@
 //! It wires together the four pieces of a Ditto agent:
 //!   1. a local Turso `Store` (embedded SQLite-family DB with native vectors),
 //!   2. an `Embedder` (Ollama `embeddinggemma` by default, 768 dims),
-//!   3. a chat `Model` (OpenRouter or local Ollama/vLLM),
+//!   3. a chat `Model` (OpenRouter, Chutes, or local Ollama/vLLM),
 //!   4. a `chat::Harness` that prepares memory context, exposes memory tools,
 //!      runs the agent loop, and (optionally) saves the turn.
 //!
@@ -14,7 +14,8 @@
 //! Miners improve their score by editing THIS file. The high-leverage knobs:
 //!
 //!  * MODEL CHOICE — `Baseline::build_model`. Swap the OpenRouter model id,
-//!    point at a local Ollama model (free, private), or a vLLM endpoint. A
+//!    use Chutes hosted inference, point at a local Ollama model (free,
+//!    private), or a vLLM endpoint. A
 //!    smarter/faster model directly moves tool-accuracy and latency.
 //!
 //!  * SYSTEM PROMPT — `PrepareRequest::system_prompt` in `run()`. The wire
@@ -33,6 +34,7 @@
 //!    are fine for tool-calling cases.
 //! =========================================================================
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -40,14 +42,15 @@ use anyhow::Context;
 use async_trait::async_trait;
 use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
-use ditto_harness::db::Db;
-use ditto_harness::memory::{
-    CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions,
+use ditto_harness::db::{Db, EMBEDDING_DIMS};
+use ditto_harness::memory::{CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions};
+use ditto_harness::models::{
+    ChatModelConfig, ModelParams, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL,
 };
-use ditto_harness::models::{ChatModelConfig, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
 use ditto_harness::retrieval::{MlpPredictor, Reranker, Variant, WeightPredictor};
 use ditto_harness::types::{
-    ChatMessage, Content, Embedder, Model, Result as HarnessResult, Tool, ToolDefinition,
+    ChatMessage, Content, EmbedRequest, EmbedResponse, Embedder, Model, Result as HarnessResult,
+    Tool, ToolDefinition,
 };
 use serde_json::{json, Value};
 
@@ -91,8 +94,79 @@ impl Tool for WireTool {
     }
 }
 
+/// Deterministic local embedder for smoke-testing without an embedding server.
+///
+/// The production-faithful path remains `embeddinggemma`; this fallback exists
+/// for local OpenAI-compatible servers such as vLLM/llama.cpp that expose chat
+/// completions but no `/v1/embeddings` route.
+struct HashEmbedder;
+
+#[async_trait]
+impl Embedder for HashEmbedder {
+    async fn embed(&self, req: EmbedRequest) -> HarnessResult<EmbedResponse> {
+        Ok(EmbedResponse {
+            embeddings: req.texts.iter().map(|text| hash_embedding(text)).collect(),
+            ..EmbedResponse::default()
+        })
+    }
+}
+
+fn hash_embedding(text: &str) -> Vec<f32> {
+    let mut vec = vec![0f32; EMBEDDING_DIMS];
+    for token in text.to_lowercase().split_whitespace() {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        token.hash(&mut hasher);
+        let idx = (hasher.finish() % EMBEDDING_DIMS as u64) as usize;
+        vec[idx] += 1.0;
+    }
+    let norm: f64 = vec.iter().map(|v| (*v as f64) * (*v as f64)).sum();
+    if norm == 0.0 {
+        vec[0] = 1.0;
+        return vec;
+    }
+    let scale = (1.0 / norm.sqrt()) as f32;
+    for v in &mut vec {
+        *v *= scale;
+    }
+    vec
+}
+
+fn parse_optional_f64_env(name: &str) -> anyhow::Result<Option<f64>> {
+    match std::env::var(name) {
+        Ok(raw) if raw.trim().is_empty() => Ok(None),
+        Ok(raw) => raw
+            .parse::<f64>()
+            .map(Some)
+            .with_context(|| format!("parse {name}={raw:?} as float")),
+        Err(_) => Ok(None),
+    }
+}
+
+fn parse_optional_u64_env(name: &str) -> anyhow::Result<Option<u64>> {
+    match std::env::var(name) {
+        Ok(raw) if raw.trim().is_empty() => Ok(None),
+        Ok(raw) => raw
+            .parse::<u64>()
+            .map(Some)
+            .with_context(|| format!("parse {name}={raw:?} as unsigned integer")),
+        Err(_) => Ok(None),
+    }
+}
+
+fn max_turns_from_env() -> anyhow::Result<usize> {
+    let Some(max_turns) = parse_optional_u64_env("DITTOBENCH_MAX_TURNS")? else {
+        return Ok(4);
+    };
+    anyhow::ensure!(max_turns > 0, "DITTOBENCH_MAX_TURNS must be at least 1");
+    Ok(max_turns as usize)
+}
+
 /// Default local DB path (overridable via `DITTOBENCH_DB`).
 pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
+/// Chutes OpenAI-compatible inference endpoint.
+pub const CHUTES_BASE_URL: &str = "https://llm.chutes.ai/v1";
+/// Default Chutes DeepSeek model from the live public catalog.
+pub const DEFAULT_CHUTES_MODEL: &str = "deepseek-ai/DeepSeek-V3.2-TEE";
 /// Fixed user id for the single-tenant miner DB.
 pub const USER_ID: &str = "miner";
 
@@ -114,19 +188,48 @@ pub enum ModelProvider {
     OpenRouter { model: String },
     /// Local Ollama server.
     Ollama { base_url: String, model: String },
+    /// OpenAI-compatible local server, such as vLLM or llama.cpp.
+    Vllm { base_url: String, model: String },
+    /// Chutes OpenAI-compatible hosted inference.
+    Chutes {
+        base_url: String,
+        api_key: String,
+        model: String,
+    },
 }
 
 impl ModelProvider {
-    /// Resolves the provider from environment variables. Defaults to OpenRouter
-    /// with a fast tool-capable model; falls back to Ollama if
-    /// `DITTOBENCH_PROVIDER=ollama`.
+    /// Resolves the provider from environment variables.
     pub fn from_env() -> ModelProvider {
-        match std::env::var("DITTOBENCH_PROVIDER").as_deref() {
-            Ok("ollama") => ModelProvider::Ollama {
+        match std::env::var("DITTOBENCH_PROVIDER")
+            .unwrap_or_else(|_| "openrouter".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "ollama" => ModelProvider::Ollama {
                 base_url: std::env::var("OLLAMA_BASE_URL")
                     .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string()),
                 model: std::env::var("DITTOBENCH_MODEL")
                     .unwrap_or_else(|_| "qwen2.5:7b".to_string()),
+            },
+            "vllm" | "openai-compat" | "openai_compat" | "openai-compatible" => {
+                ModelProvider::Vllm {
+                    base_url: std::env::var("DITTOBENCH_BASE_URL")
+                        .or_else(|_| std::env::var("OPENAI_BASE_URL"))
+                        .unwrap_or_else(|_| "http://127.0.0.1:8000/v1".to_string()),
+                    model: std::env::var("DITTOBENCH_MODEL")
+                        .unwrap_or_else(|_| "gemma4-e4b-it-vlm".to_string()),
+                }
+            }
+            "chutes" => ModelProvider::Chutes {
+                base_url: std::env::var("CHUTES_BASE_URL")
+                    .or_else(|_| std::env::var("OPENAI_BASE_URL"))
+                    .unwrap_or_else(|_| CHUTES_BASE_URL.to_string()),
+                api_key: std::env::var("CHUTES_API_KEY")
+                    .or_else(|_| std::env::var("OPENAI_API_KEY"))
+                    .unwrap_or_default(),
+                model: std::env::var("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|_| DEFAULT_CHUTES_MODEL.to_string()),
             },
             _ => ModelProvider::OpenRouter {
                 // EXTENSION POINT: change this default model.
@@ -151,12 +254,18 @@ pub struct Baseline {
 impl Baseline {
     /// Builds the baseline from environment configuration:
     ///   - `DITTOBENCH_DB` (db path, default `./dittobench.db`)
-    ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama`)
+    ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama` | `vllm` | `chutes`)
     ///   - `DITTOBENCH_MODEL` (model id)
+    ///   - `DITTOBENCH_BASE_URL` (required for `vllm` unless using localhost:8000)
+    ///   - `DITTOBENCH_MAX_TOKENS`, `DITTOBENCH_TEMPERATURE` (optional sampling controls)
+    ///   - `DITTOBENCH_MAX_TURNS` (optional harness loop cap, default `4`)
+    ///   - `DITTOBENCH_EMBEDDER` (`ollama` [default] | `hash`)
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
+    ///   - `CHUTES_API_KEY` or `OPENAI_API_KEY` (required for Chutes)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
     pub async fn from_env() -> anyhow::Result<Baseline> {
-        let db_path = std::env::var("DITTOBENCH_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+        let db_path =
+            std::env::var("DITTOBENCH_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
         let store = Self::open_store(&db_path).await?;
         let model = Self::build_model(&ModelProvider::from_env())?;
         Ok(Baseline {
@@ -166,14 +275,14 @@ impl Baseline {
         })
     }
 
-    /// Opens (creating if needed) the local Turso store with the Ollama
+    /// Opens (creating if needed) the local Turso store with the configured
     /// embedder, the production weight-predictor MLP, and the production
-    /// cross-encoder reranker — mirroring the production retrieval stack 1:1.
+    /// cross-encoder reranker.
     pub async fn open_store(db_path: &str) -> anyhow::Result<Arc<Store>> {
         let db = Db::open(db_path)
             .await
             .with_context(|| format!("open turso db {db_path}"))?;
-        let embedder: Arc<dyn Embedder> = Arc::new(Self::build_embedder());
+        let embedder = Self::build_embedder();
         Ok(Arc::new(Store::new(StoreOptions {
             db: Arc::new(db),
             embedder,
@@ -202,12 +311,22 @@ impl Baseline {
         Ok(Arc::new(ce))
     }
 
-    /// The embedder (Ollama `embeddinggemma`, 768 dims). EXTENSION POINT: swap
-    /// for another embedder implementing `ditto_harness::types::Embedder`.
-    pub fn build_embedder() -> OllamaEmbedder {
-        let base_url =
-            std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
-        OllamaEmbedder::new(base_url)
+    /// The embedder. Defaults to Ollama `embeddinggemma` for benchmark
+    /// fidelity; set `DITTOBENCH_EMBEDDER=hash` for offline local UI smoke
+    /// tests when the chat server does not expose embeddings.
+    pub fn build_embedder() -> Arc<dyn Embedder> {
+        match std::env::var("DITTOBENCH_EMBEDDER")
+            .unwrap_or_else(|_| "ollama".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "hash" | "local-hash" => Arc::new(HashEmbedder),
+            _ => {
+                let base_url = std::env::var("OLLAMA_BASE_URL")
+                    .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
+                Arc::new(OllamaEmbedder::new(base_url))
+            }
+        }
     }
 
     /// Builds the chat model. EXTENSION POINT: model selection.
@@ -222,10 +341,35 @@ impl Baseline {
             ModelProvider::Ollama { base_url, model } => {
                 ChatModelConfig::ollama(base_url.clone(), model.clone())
             }
+            ModelProvider::Vllm { base_url, model } => {
+                ChatModelConfig::vllm(base_url.clone(), model.clone())
+            }
+            ModelProvider::Chutes {
+                base_url,
+                api_key,
+                model,
+            } => {
+                anyhow::ensure!(
+                    !api_key.is_empty(),
+                    "CHUTES_API_KEY is not set; export it or set OPENAI_API_KEY"
+                );
+                ChatModelConfig::OpenAiCompat {
+                    base_url: base_url.clone(),
+                    api_key: api_key.clone(),
+                    model: model.clone(),
+                }
+            }
         };
         config
-            .build()
+            .build_with_params(Self::model_params_from_env()?)
             .map_err(|err| anyhow::anyhow!("build chat model: {err}"))
+    }
+
+    fn model_params_from_env() -> anyhow::Result<ModelParams> {
+        Ok(ModelParams {
+            temperature: parse_optional_f64_env("DITTOBENCH_TEMPERATURE")?,
+            max_tokens: parse_optional_u64_env("DITTOBENCH_MAX_TOKENS")?,
+        })
     }
 
     /// Direct access to the underlying store (for seeding memory fixtures).
@@ -336,7 +480,9 @@ impl Baseline {
         let host_tools: Vec<Arc<dyn Tool>> = req
             .tools
             .iter()
-            .filter(|d| !(self.include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str())))
+            .filter(|d| {
+                !(self.include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str()))
+            })
             .map(|d| Arc::new(WireTool::from_wire(d)) as Arc<dyn Tool>)
             .collect();
 
@@ -375,7 +521,7 @@ impl Baseline {
                     },
                     // One tool call per case is the scored unit; allow a few
                     // turns so the model can read a tool result then answer.
-                    max_turns: 4,
+                    max_turns: max_turns_from_env()?,
                     save_memory: false,
                     ..ChatRunRequest::default()
                 },
