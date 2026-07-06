@@ -56,7 +56,7 @@ export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # 2. Pick a chat model. Default provider is OpenRouter:
 export OPENROUTER_API_KEY=sk-or-...
-# (optional) export DITTOBENCH_MODEL=anthropic/claude-3.5-haiku
+# Default model is z-ai/glm-5.2; override with DITTOBENCH_MODEL if desired.
 
 #    ...or run fully local with Ollama:
 # export DITTOBENCH_PROVIDER=ollama
@@ -67,8 +67,9 @@ export OPENROUTER_API_KEY=sk-or-...
 # export CHUTES_API_KEY=cpk_...
 # export DITTOBENCH_MODEL=deepseek-ai/DeepSeek-V3.2-TEE
 
-# 3. Embeddings use Ollama's embeddinggemma (768-dim) by default. For memory
-#    cases you need it running locally:
+# 3. Embeddings default to the deterministic hash embedder so Docker/sandbox
+#    submissions are self-contained. For embeddinggemma locally:
+#       export DITTOBENCH_EMBEDDER=ollama
 #       ollama serve
 #       ollama pull embeddinggemma
 
@@ -150,13 +151,12 @@ agent/tool changes (watch `composite`, per-category tool means, slowest cases).
 
 ### Embedder note
 
-The kit defaults to local **Ollama `embeddinggemma`** (768-dim) for a free,
-self-contained loop. To make the ranker work in that space, the shipped MLP is
-**retrained on embeddinggemma** (via the production training pipeline, on
-LongMemEval) — so it's calibrated to the kit's default embedder out of the box.
-On the bundled seed user this lifts retrieval from **hit@10 0.90 → 0.96** vs the
-Vertex-trained weights. The **cross-encoder rerank is embedder-independent** (it
-scores raw text), so it's identical to production regardless.
+The kit defaults to the deterministic **hash embedder** so Docker/sandbox
+submissions are self-contained. For local retrieval work you can set
+`DITTOBENCH_EMBEDDER=ollama` to use **Ollama `embeddinggemma`** (768-dim). The
+shipped MLP was retrained on embeddinggemma via the production training pipeline,
+while the cross-encoder rerank is embedder-independent because it scores raw
+text.
 
 If you switch `build_embedder` to a different embedder, retrain the MLP for that
 space (see `backend/pkg/services/retrieval/training/synthesize_gemma.py`); to run

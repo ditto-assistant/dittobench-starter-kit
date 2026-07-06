@@ -80,7 +80,7 @@ cargo run -- serve --port 8080   # expose POST /run + GET /health for the valida
 ```ini
 OPENROUTER_API_KEY=sk-or-v1-...          # chat model key
 DITTOBENCH_PROVIDER=openrouter           # or `ollama`, `vllm`, `chutes`
-DITTOBENCH_MODEL=google/gemini-3.1-flash-lite   # prod default; provider model id
+DITTOBENCH_MODEL=z-ai/glm-5.2            # provider model id; optional override
 OLLAMA_BASE_URL=http://localhost:11434   # embeddings (and ollama chat) endpoint
 DITTOBENCH_DB=./dittobench.db            # local Turso DB; keep the same path across seed-user + commands
 ```
@@ -113,6 +113,6 @@ validator uses — is coming soon; details will land here when it's live.
 ## Troubleshooting
 
 - **`failed to authenticate` / `403` fetching ditto-harness** → finish step 0 (`gh auth setup-git` + `CARGO_NET_GIT_FETCH_WITH_CLI=true`).
-- **`mem-eval` reports `recall@k: 0.000`** → run `seed-user` first, and confirm `ollama serve` + `ollama pull embeddinggemma`, and that `DITTOBENCH_DB` matches what you seeded.
+- **`mem-eval` reports `recall@k: 0.000`** → run `seed-user` first, confirm `DITTOBENCH_DB` matches what you seeded, and if you set `DITTOBENCH_EMBEDDER=ollama`, confirm `ollama serve` + `ollama pull embeddinggemma`.
 - **`feature edition2024 is required`** → update Rust (`rustup update`); the harness needs ≥ 1.85.
-- **Playground reply is empty / over-calls a tool** → the prod default `gemini-3.1-flash-lite` is a lite model; set a stronger `DITTOBENCH_MODEL` in `.env`.
+- **Playground reply is empty / over-calls a tool** → try a stronger `DITTOBENCH_MODEL` in `.env` or tune `DITTOBENCH_MAX_TURNS`.

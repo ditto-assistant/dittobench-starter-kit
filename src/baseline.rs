@@ -2,7 +2,7 @@
 //!
 //! It wires together the four pieces of a Ditto agent:
 //!   1. a local Turso `Store` (embedded SQLite-family DB with native vectors),
-//!   2. an `Embedder` (Ollama `embeddinggemma` by default, 768 dims),
+//!   2. an `Embedder` (hash by default for portable sandbox submissions),
 //!   3. a chat `Model` (OpenRouter, Chutes, or local Ollama/vLLM),
 //!   4. a `chat::Harness` that prepares memory context, exposes memory tools,
 //!      runs the agent loop, and (optionally) saves the turn.
@@ -136,7 +136,7 @@ fn parse_optional_u64_env(name: &str) -> anyhow::Result<Option<u64>> {
 
 fn max_turns_from_env() -> anyhow::Result<usize> {
     let Some(max_turns) = parse_optional_u64_env("DITTOBENCH_MAX_TURNS")? else {
-        return Ok(4);
+        return Ok(2);
     };
     anyhow::ensure!(max_turns > 0, "DITTOBENCH_MAX_TURNS must be at least 1");
     Ok(max_turns as usize)
@@ -283,7 +283,7 @@ impl ModelProvider {
             _ => ModelProvider::OpenRouter {
                 // EXTENSION POINT: change this default model.
                 model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| "anthropic/claude-3.5-haiku".to_string()),
+                    .unwrap_or_else(|_| "z-ai/glm-5.2".to_string()),
             },
         }
     }
@@ -308,8 +308,8 @@ impl Baseline {
     ///   - `DITTOBENCH_MODEL` (model id)
     ///   - `DITTOBENCH_BASE_URL` (required for `vllm` unless using localhost:8000)
     ///   - `DITTOBENCH_MAX_TOKENS`, `DITTOBENCH_TEMPERATURE` (optional sampling controls)
-    ///   - `DITTOBENCH_MAX_TURNS` (optional harness loop cap, default `4`)
-    ///   - `DITTOBENCH_EMBEDDER` (`ollama` [default] | `hash`)
+    ///   - `DITTOBENCH_MAX_TURNS` (optional harness loop cap, default `2`)
+    ///   - `DITTOBENCH_EMBEDDER` (`hash` [default] | `ollama`)
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
     ///   - `CHUTES_API_KEY` or `OPENAI_API_KEY` (required for Chutes)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
@@ -362,12 +362,12 @@ impl Baseline {
         Ok(Arc::new(ce))
     }
 
-    /// The embedder. Defaults to Ollama `embeddinggemma` for benchmark
-    /// fidelity; set `DITTOBENCH_EMBEDDER=hash` for offline local UI smoke
-    /// tests when the chat server does not expose embeddings.
+    /// The embedder. Defaults to the deterministic hash embedder so hosted
+    /// sandbox submissions do not depend on an Ollama sidecar. Set
+    /// `DITTOBENCH_EMBEDDER=ollama` for the embeddinggemma path.
     pub fn build_embedder() -> Arc<dyn Embedder> {
         match std::env::var("DITTOBENCH_EMBEDDER")
-            .unwrap_or_else(|_| "ollama".to_string())
+            .unwrap_or_else(|_| "hash".to_string())
             .to_lowercase()
             .as_str()
         {
@@ -419,7 +419,7 @@ impl Baseline {
     fn model_params_from_env() -> anyhow::Result<ModelParams> {
         Ok(ModelParams {
             temperature: parse_optional_f64_env("DITTOBENCH_TEMPERATURE")?,
-            max_tokens: parse_optional_u64_env("DITTOBENCH_MAX_TOKENS")?,
+            max_tokens: parse_optional_u64_env("DITTOBENCH_MAX_TOKENS")?.or(Some(256)),
         })
     }
 
