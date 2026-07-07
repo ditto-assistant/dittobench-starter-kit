@@ -60,6 +60,11 @@ with subjects already synced.
 export OPENROUTER_API_KEY=sk-or-...
 # (optional) export DITTOBENCH_MODEL=<any OpenRouter model id>
 
+#    ...or use Chutes hosted OpenAI-compatible inference:
+# export DITTOBENCH_PROVIDER=chutes
+# export CHUTES_API_KEY=cpk_...
+# export DITTOBENCH_MODEL=deepseek-ai/DeepSeek-V3.2-TEE
+
 #    ...or run fully local with Ollama:
 # export DITTOBENCH_PROVIDER=ollama
 # export DITTOBENCH_MODEL=qwen2.5:7b
@@ -164,8 +169,9 @@ the highest-value change you can make.
 
 Everything you tune lives in `src/baseline.rs`, marked `EXTENSION POINT`:
 
-1. **Model choice**: swap the OpenRouter model id, or go local with
-  Ollama/vLLM. The single biggest lever on both accuracy and latency.
+1. **Model choice**: swap the OpenRouter model id, use Chutes hosted
+  inference, or go local with Ollama/vLLM. The single biggest lever on both
+  accuracy and latency.
 2. **System prompt**: augment the per-case prompt with a tool-use policy and
   abstention rules so the agent picks the right tool (and *no* tool when it
    shouldn't).

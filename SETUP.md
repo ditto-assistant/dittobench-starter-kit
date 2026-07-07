@@ -68,13 +68,17 @@ cargo run -- serve --port 8080   # expose GET /health, POST /run, POST /seed for
 
 ```ini
 OPENROUTER_API_KEY=sk-or-v1-...          # chat model key
-DITTOBENCH_PROVIDER=openrouter           # or `ollama` to run the chat model locally (free)
-DITTOBENCH_MODEL=google/gemini-3.1-flash-lite   # mirrors prod; any OpenRouter/Ollama model id
+DITTOBENCH_PROVIDER=openrouter           # or `ollama` locally (free), or `chutes` hosted
+DITTOBENCH_MODEL=google/gemini-3.1-flash-lite   # mirrors prod; provider-specific model id
 OLLAMA_BASE_URL=http://localhost:11434   # embeddings (and ollama chat) endpoint
 DITTOBENCH_DB=./dittobench.db            # local Turso DB; keep the same path across seed-user + commands
 ```
 
 Fully local (no API key): set `DITTOBENCH_PROVIDER=ollama` and `DITTOBENCH_MODEL=qwen2.5:7b`.
+
+Chutes hosted inference: set `DITTOBENCH_PROVIDER=chutes`,
+`CHUTES_API_KEY=cpk_...`, and optionally `CHUTES_BASE_URL`; the default Chutes
+model is `deepseek-ai/DeepSeek-V3.2-TEE`.
 
 ---
 
