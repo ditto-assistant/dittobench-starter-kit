@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -123,6 +123,12 @@ async fn serve(port: u16) -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/run", post(run_handler))
         .route("/seed", post(seed_handler))
+        // The validator POSTs the whole seed haystack to /seed in one request;
+        // at run_size=full that is hundreds of pairs over thousands of subjects
+        // and exceeds axum's 2 MB default body limit (413 "length limit
+        // exceeded"). The validator is the trusted scoring authority, so lift
+        // the cap to a generous bound rather than the default.
+        .layer(DefaultBodyLimit::max(256 * 1024 * 1024))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
