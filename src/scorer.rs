@@ -28,6 +28,29 @@ use crate::protocol::{CaseScore, Dataset, RunResponse, ScoreReport, ToolCase};
 const TOOL_WEIGHT: f64 = 0.6;
 const MEMORY_WEIGHT: f64 = 0.4;
 
+/// Latency (wall-clock) scoring — mirrors the backend scorer. A per-case
+/// latency is mapped to a 0..1 reward: full credit at/below `LATENCY_TARGET_MS`,
+/// zero at/above `LATENCY_CEILING_MS`, linear between. The mean reward
+/// (`latency_mean`) takes `LATENCY_WEIGHT` of the final composite; correctness
+/// keeps the rest, so speed can lift a correct-but-slow harness but never
+/// rescues a wrong one. These are the sole latency policy knobs.
+const LATENCY_TARGET_MS: i64 = 1000;
+const LATENCY_CEILING_MS: i64 = 10_000;
+/// Latency's share of the final composite; correctness keeps `1 - LATENCY_WEIGHT`.
+pub const LATENCY_WEIGHT: f64 = 0.10;
+
+/// Maps a per-case wall-clock latency (ms) to a 0..1 reward via the linear
+/// target→ceiling curve.
+pub fn latency_score(ms: i64) -> f64 {
+    if ms <= LATENCY_TARGET_MS {
+        1.0
+    } else if ms >= LATENCY_CEILING_MS {
+        0.0
+    } else {
+        (LATENCY_CEILING_MS - ms) as f64 / (LATENCY_CEILING_MS - LATENCY_TARGET_MS) as f64
+    }
+}
+
 /// Builds the aggregate report.
 ///
 /// - `tool_resps`: case_id -> RunResponse for tool cases. Missing responses
@@ -44,6 +67,7 @@ pub fn score(
     let mut tool_sum = 0.0;
     let mut latencies: Vec<i64> = Vec::with_capacity(per_case.capacity());
 
+    let mut latency_sum = 0.0;
     for c in &ds.tool_cases {
         let resp = tool_resps.get(&c.id);
         let mut cs = score_tool_case(c, resp);
@@ -53,7 +77,9 @@ pub fn score(
             cs.tool_score = 0.5 * cs.tool_score + 0.5 * jq;
             cs.notes.push(format!("response-quality judge {jq:.2}"));
         }
+        cs.latency_score = latency_score(cs.latency_ms);
         tool_sum += cs.tool_score;
+        latency_sum += cs.latency_score;
         latencies.push(cs.latency_ms);
         per_case.push(cs);
     }
@@ -65,6 +91,8 @@ pub fn score(
         let s = if correct { 1.0 } else { 0.0 };
         mem_sum += s;
         latencies.push(latency);
+        let lat_score = latency_score(latency);
+        latency_sum += lat_score;
         let mut notes = Vec::new();
         if !mem_results.contains_key(&mc.id) {
             notes.push("no response from harness (error or timeout)".to_string());
@@ -76,6 +104,7 @@ pub fn score(
             category: "memory_recall".to_string(),
             tool_score: s,
             latency_ms: latency,
+            latency_score: lat_score,
             called: Vec::new(),
             expected: vec![mc.expected_answer.clone()],
             notes,
@@ -95,12 +124,26 @@ pub fn score(
         0.0
     };
 
-    let composite = if n_mem > 0 && n_tool > 0 {
+    let correctness = if n_mem > 0 && n_tool > 0 {
         TOOL_WEIGHT * tool_mean + MEMORY_WEIGHT * memory_mean
     } else if n_mem > 0 {
         memory_mean
     } else {
         tool_mean
+    };
+
+    let n_total = n_tool + n_mem;
+    let latency_mean = if n_total > 0 {
+        latency_sum / n_total as f64
+    } else {
+        0.0
+    };
+    // Blend wall-clock into the composite: correctness keeps (1-LATENCY_WEIGHT),
+    // latency takes LATENCY_WEIGHT. Correctness stays primary.
+    let composite = if n_total > 0 {
+        (1.0 - LATENCY_WEIGHT) * correctness + LATENCY_WEIGHT * latency_mean
+    } else {
+        correctness
     };
 
     ScoreReport {
@@ -109,8 +152,9 @@ pub fn score(
         composite,
         tool_mean,
         memory_mean,
+        latency_mean,
         median_ms: median(&latencies),
-        n: (n_tool + n_mem) as i32,
+        n: n_total as i32,
         per_case,
     }
 }
@@ -139,6 +183,7 @@ pub fn score_tool_case(c: &ToolCase, resp: Option<&RunResponse>) -> CaseScore {
         category: c.category.clone(),
         tool_score: 0.0,
         latency_ms,
+        latency_score: latency_score(latency_ms),
         called,
         expected,
         notes: Vec::new(),
@@ -357,7 +402,37 @@ mod tests {
         let r = score("run", &ds, &tool, &HashMap::new(), &mem);
         assert_eq!(r.tool_mean, 1.0);
         assert_eq!(r.memory_mean, 0.0);
-        assert!((r.composite - 0.6).abs() < 1e-9, "composite = {}", r.composite);
+        // Both cases are sub-target latency → latency_mean 1.0. correctness =
+        // 0.6*1 + 0.4*0 = 0.6; composite = 0.9*0.6 + 0.1*1.0 = 0.64.
+        assert_eq!(r.latency_mean, 1.0);
+        assert!((r.composite - 0.64).abs() < 1e-9, "composite = {}", r.composite);
+    }
+
+    #[test]
+    fn latency_curve_maps_target_and_ceiling() {
+        assert_eq!(latency_score(0), 1.0);
+        assert_eq!(latency_score(LATENCY_TARGET_MS), 1.0);
+        assert_eq!(latency_score(LATENCY_CEILING_MS), 0.0);
+        assert_eq!(latency_score(LATENCY_CEILING_MS + 5_000), 0.0);
+        // midpoint of 1000..10000 → 0.5
+        assert!((latency_score(5_500) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn slow_run_loses_latency_slice() {
+        // Perfect tool accuracy but at/over the latency ceiling: correctness 1.0,
+        // latency_mean 0.0 → composite = 0.9*1.0 + 0.1*0.0 = 0.9.
+        let ds = Dataset {
+            tool_cases: vec![tool_case("a", &["search_web"], false)],
+            ..Dataset::default()
+        };
+        let mut m = HashMap::new();
+        m.insert("a".to_string(), resp(&["search_web"], LATENCY_CEILING_MS));
+        let r = score("run", &ds, &m, &HashMap::new(), &HashMap::new());
+        assert_eq!(r.tool_mean, 1.0);
+        assert_eq!(r.latency_mean, 0.0);
+        assert!((r.composite - 0.9).abs() < 1e-9, "composite = {}", r.composite);
+        assert_eq!(r.per_case[0].latency_score, 0.0);
     }
 
     #[test]

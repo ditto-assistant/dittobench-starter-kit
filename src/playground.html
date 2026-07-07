@@ -270,6 +270,7 @@ function renderScoreSummary(job){
     <div class="sc-metrics">
       <div><b>${job.tool_mean.toFixed(3)}</b><span>tool</span></div>
       <div><b>${job.memory_mean.toFixed(3)}</b><span>memory</span></div>
+      <div><b>${(job.latency_mean!=null?job.latency_mean:0).toFixed(3)}</b><span>latency</span></div>
       <div><b>${job.median_ms}</b><span>median ms</span></div>
     </div>`;
 }
@@ -349,6 +350,7 @@ function renderReport(rep){
     <div class="sc-metrics">
       <div><b>${f(rep.tool_mean).toFixed(3)}</b><span>tool</span></div>
       <div><b>${f(rep.memory_mean).toFixed(3)}</b><span>memory</span></div>
+      <div><b>${f(rep.latency_mean).toFixed(3)}</b><span>latency</span></div>
       <div><b>${rep.median_ms!=null?rep.median_ms:(rep.median!=null?rep.median:0)}</b><span>median ms</span></div>
     </div>`;
   // chart: tool vs memory, plus per-category means if present.

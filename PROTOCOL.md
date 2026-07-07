@@ -45,8 +45,8 @@ Response body — `RunResponse`:
 
 ## Score shapes
 
-- `CaseScore { case_id, category, tool_score, latency_ms, called[], expected[], notes[] }`
-- `ScoreReport { run_id, generated_at, composite, tool_mean, memory_mean, median_ms, n, per_case[] }`
+- `CaseScore { case_id, category, tool_score, latency_ms, latency_score, called[], expected[], notes[] }`
+- `ScoreReport { run_id, generated_at, composite, tool_mean, memory_mean, latency_mean, median_ms, n, per_case[] }`
 
 ### Scoring rules (local approximation)
 Tool accuracy per case:
@@ -60,8 +60,18 @@ Memory accuracy: a case is correct when `final_text` contains
 `expected_answer` (case-insensitive substring). `memory_mean` is the fraction
 correct.
 
-`composite = 0.6 * tool_mean + 0.4 * memory_mean` when both kinds are present;
-otherwise it equals whichever mean exists.
+Latency (wall-clock) per case: `latency_score = 1.0` at/below the target
+(`1000ms`), `0.0` at/above the ceiling (`10000ms`), linear between.
+`latency_mean` is the mean `latency_score` across all cases.
+
+`correctness = 0.6 * tool_mean + 0.4 * memory_mean` when both kinds are present;
+otherwise it equals whichever mean exists. The composite then folds in latency
+with correctness kept primary:
+
+`composite = 0.9 * correctness + 0.1 * latency_mean`
+
+Speed can lift a correct-but-slow harness but never rescues a wrong one. The
+target, ceiling, and 10% weight are the only latency knobs (`src/scorer.rs`).
 
 > The on-chain SN118 validator uses an LLM judge for memory recall (and richer
 > tool semantics). The local scorer is a fast, deterministic proxy for

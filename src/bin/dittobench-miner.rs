@@ -446,6 +446,7 @@ fn print_report(report: &protocol::ScoreReport, ds: &protocol::Dataset) {
     println!("composite:   {:.3}", report.composite);
     println!("tool_mean:   {:.3}", report.tool_mean);
     println!("memory_mean: {:.3}", report.memory_mean);
+    println!("latency_mean:{:.3}", report.latency_mean);
     println!("median_ms:   {}", report.median_ms);
     println!("n:           {}", report.n);
 

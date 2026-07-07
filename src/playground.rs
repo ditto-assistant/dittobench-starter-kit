@@ -424,6 +424,7 @@ pub struct ScoreJob {
     pub composite: f64,
     pub tool_mean: f64,
     pub memory_mean: f64,
+    pub latency_mean: f64,
     pub median_ms: i64,
     pub error: String,
 }
@@ -748,12 +749,25 @@ async fn run_scoring(
 
     let tool_mean = mean(&tool_scores);
     let memory_mean = mean(&mem_scores);
-    let composite = if !tool_scores.is_empty() && !mem_scores.is_empty() {
+    let correctness = if !tool_scores.is_empty() && !mem_scores.is_empty() {
         0.6 * tool_mean + 0.4 * memory_mean
     } else if !mem_scores.is_empty() {
         memory_mean
     } else {
         tool_mean
+    };
+    // Mirror scorer::score: fold wall-clock in with correctness kept primary.
+    let latency_mean = if latencies.is_empty() {
+        0.0
+    } else {
+        latencies.iter().map(|&ms| crate::scorer::latency_score(ms)).sum::<f64>()
+            / latencies.len() as f64
+    };
+    let composite = if latencies.is_empty() {
+        correctness
+    } else {
+        (1.0 - crate::scorer::LATENCY_WEIGHT) * correctness
+            + crate::scorer::LATENCY_WEIGHT * latency_mean
     };
     let median = median_i64(&latencies);
 
@@ -762,6 +776,7 @@ async fn run_scoring(
         job.status = "done".to_string();
         job.tool_mean = tool_mean;
         job.memory_mean = memory_mean;
+        job.latency_mean = latency_mean;
         job.composite = composite;
         job.median_ms = median;
     }

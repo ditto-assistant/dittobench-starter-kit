@@ -128,6 +128,10 @@ pub struct CaseScore {
     /// 0..1.
     pub tool_score: f64,
     pub latency_ms: i64,
+    /// 0..1 wall-clock reward: 1.0 at/below the latency target, 0.0 at/above the
+    /// ceiling, linear between (see `scorer`).
+    #[serde(default)]
+    pub latency_score: f64,
     pub called: Vec<String>,
     pub expected: Vec<String>,
     #[serde(default)]
@@ -147,6 +151,9 @@ pub struct ScoreReport {
     pub tool_mean: f64,
     /// 0..1 fraction of memory cases answered correctly.
     pub memory_mean: f64,
+    /// 0..1 mean per-case wall-clock reward (see the latency curve in `scorer`).
+    #[serde(default)]
+    pub latency_mean: f64,
     pub median_ms: i64,
     pub n: i32,
     pub per_case: Vec<CaseScore>,
