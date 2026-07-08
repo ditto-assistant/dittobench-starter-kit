@@ -3,18 +3,16 @@ name = "dittobench-starter-kit"
 version = "0.1.0"
 edition = "2021"
 description = "DittoBench (SN118) miner starter kit: a local agent/memory harness over the ditto-harness crate."
-license = "AGPL-3.0-or-later"
+license = "MIT"
 
 [[bin]]
 name = "dittobench-miner"
 path = "src/bin/dittobench-miner.rs"
 
 [dependencies]
-# The Ditto agent + memory harness (private git dep). This rev IS the current
-# ditto-harness `main` HEAD. Build needs git read access to the private repo:
-#   gh auth login && gh auth setup-git   (or any github.com credential helper)
-#   export CARGO_NET_GIT_FETCH_WITH_CLI=true
-# To track a newer harness: bump `rev` to the new main commit, then `cargo update -p ditto-harness`.
+# The Ditto agent + memory harness (public git dep), pinned to a known-good
+# ditto-harness commit for reproducible builds. Bump `rev` deliberately: set it
+# to the new commit, `cargo update -p ditto-harness`, then run the full suite.
 ditto-harness = { git = "https://github.com/ditto-assistant/ditto-harness", rev = "41bb639727ea6ef6b1cbcf701270dee3cf10d871" }
 
 tokio = { version = "1", features = ["full"] }

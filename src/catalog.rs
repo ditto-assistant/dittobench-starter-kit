@@ -106,10 +106,7 @@ pub fn catalog() -> Vec<ToolDefWire> {
             "execute_agent_workflow",
             "Run a predefined multi-step agent workflow.",
             params(
-                &[
-                    ("workflow", "workflow name"),
-                    ("input", "workflow input"),
-                ],
+                &[("workflow", "workflow name"), ("input", "workflow input")],
                 &["workflow"],
             ),
         ),
@@ -146,7 +143,10 @@ pub fn catalog() -> Vec<ToolDefWire> {
         tool(
             "set_chat_tool_preferences",
             "Enable or disable specific tools for chat.",
-            params(&[("preferences", "tool preference settings")], &["preferences"]),
+            params(
+                &[("preferences", "tool preference settings")],
+                &["preferences"],
+            ),
         ),
     ]
 }

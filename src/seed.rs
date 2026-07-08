@@ -56,7 +56,8 @@ pub struct MemoryCase {
     pub question_type: String,
     pub query: String,
     /// Expected answer — LongMemEval stores some as numbers, so keep it as a
-    /// raw JSON value; use [`MemoryCase::answer_text`] for substring matching.
+    /// raw JSON value; use [`MemoryCase::answer_text`] for the plain-text
+    /// answer handed to the LLM QA judge.
     #[serde(default)]
     pub answer: serde_json::Value,
     #[serde(default)]
@@ -111,8 +112,7 @@ async fn load_haystack(
     links: &[Link],
     log_progress: bool,
 ) -> anyhow::Result<SeedStats> {
-    let subj_by_id: HashMap<&str, &Subject> =
-        subjects.iter().map(|s| (s.id.as_str(), s)).collect();
+    let subj_by_id: HashMap<&str, &Subject> = subjects.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut subs_by_pair: HashMap<&str, Vec<&Subject>> = HashMap::new();
     for l in links {
         if let Some(s) = subj_by_id.get(l.subject_id.as_str()) {
@@ -173,10 +173,26 @@ async fn load_haystack(
 /// Request body for the harness `POST /seed` route (snake_case). The validator
 /// sends a fresh haystack: conversation pairs, the subjects, and the
 /// subject↔pair links. `user_id` defaults to the kit [`USER_ID`].
+///
+/// DittoBench v2 seeding tiers:
+/// - **Tier A** — pairs + subjects + links (prepared, as here historically).
+/// - **Tier B** — pairs only (`subjects: []`, `links: []`): the validator seeds
+///   raw conversation pairs and expects YOUR harness to build its own subject
+///   index. `seed_from_request` runs the same `save_memory` path either way, so
+///   a harness that constructs subjects from pairs answers Tier-B questions a
+///   prepared-subjects-only harness cannot — this is where miners can win.
+/// - **Tier C** — staged waves: `/seed` is called repeatedly, each carrying the
+///   next chunk with an incremented `wave`, interleaved with `/run`. Seeding is
+///   an idempotent upsert, so accepting `wave` and merging is all that's needed.
 #[derive(Deserialize)]
 pub struct SeedRequest {
     #[serde(default)]
     pub user_id: Option<String>,
+    /// 0-based staged-seeding wave (Tier C). Advisory: seeding upserts, so a
+    /// harness can ignore this and simply merge each call. `i32` to match the
+    /// wire protocol's other counters (e.g. `ObservedToolCall::hop`).
+    #[serde(default)]
+    pub wave: i32,
     #[serde(default)]
     pub pairs: Vec<Pair>,
     #[serde(default)]

@@ -1,6 +1,6 @@
-//! LLM-judge scoring — a faithful port of the Ditto backend DittoBench judges
-//! (`backend/pkg/dittobench/scorers/judge.go` + `longmemeval.go`) that produced
-//! the published DittoBench numbers.
+//! LLM-judge scoring — a faithful port of the production DittoBench judges
+//! (the tool-response and LongMemEval QA scorers) that produced the published
+//! DittoBench numbers.
 //!
 //! Two judges, both binary/structured and called at temperature 0 in prod:
 //!   * `memory_correct` — LongMemEval QA: does the response contain the correct
@@ -8,11 +8,11 @@
 //!     verbatim system prompt + per-question-type clauses.
 //!   * `tool_response_quality` — scores the assistant's final text after tool use
 //!     on helpfulness + accuracy (1–5 each); the mean/5 is the judge half of the
-//!     tool composite (`composite = toolAccuracy/100 + judgeQuality/100`).
+//!     tool composite (`0.5 × tool-accuracy + 0.5 × judge-quality`).
 //!
-//! The judge model defaults to the kit's chat model (the prod judge is
-//! `google/gemini-3.1-flash-lite`, which is also the kit default), overridable
-//! via `DITTOBENCH_JUDGE_MODEL`.
+//! The judge runs on the kit's configured chat model (the prod judge is
+//! `google/gemini-3.1-flash-lite`; the kit's default chat model differs — see
+//! `baseline.rs` / `DITTOBENCH_MODEL`).
 
 use std::sync::Arc;
 

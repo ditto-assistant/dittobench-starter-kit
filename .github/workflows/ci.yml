@@ -1,19 +1,13 @@
 name: CI
 
-# Manual-only for now: the org's GitHub Actions budget is exhausted, so
-# push/PR-triggered runs fail to start ("Actions budget is preventing further
-# use") and show a spurious red X. Run on demand via the Actions tab. To restore
-# automatic CI, raise the Actions spending limit in org Settings → Billing, then
-# re-add the `push`/`pull_request` triggers below. (Note: CI also needs the
-# DITTO_HARNESS_DEPLOY_KEY secret to fetch the private ditto-harness dep, and
-# the ort crate downloads ONNX Runtime at build time.)
+# ditto-harness is a public git dependency, so a plain checkout + cargo build
+# just works — no credentials required. (The ort crate downloads ONNX Runtime
+# at build time.)
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-
-env:
-  # ditto-harness is a private git dependency: cargo must fetch it via the
-  # system git so it can use the SSH deploy key / credentials below.
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   build-and-test:
@@ -23,6 +17,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -33,19 +29,8 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.toml') }}
 
-      # NOTE: ditto-harness is private. Provide an SSH deploy key with read
-      # access as the `DITTO_HARNESS_DEPLOY_KEY` repo secret, or make the
-      # dependency public and delete this step.
-      - name: Configure git auth for private dep
-        if: ${{ env.DITTO_HARNESS_DEPLOY_KEY != '' }}
-        env:
-          DITTO_HARNESS_DEPLOY_KEY: ${{ secrets.DITTO_HARNESS_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$DITTO_HARNESS_DEPLOY_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          git config --global url."git@github.com:".insteadOf "https://github.com/"
+      - name: Format check
+        run: cargo fmt --check
 
       - name: Build
         run: cargo build --verbose

@@ -1,5 +1,5 @@
 //! Cross-encoder reranker — a 1:1 port of the Ditto production cross-encoder
-//! stage (`backend/pkg/services/retrieval/crossencoder/`).
+//! retrieval stage.
 //!
 //! Pipeline: the composite retriever hands us the top-[`RERANK_POOL_SIZE`]
 //! candidates ordered by composite score; we score each `(query, doc)` pair
@@ -62,15 +62,21 @@ impl CrossEncoderReranker {
         if docs.is_empty() {
             return Ok(Vec::new());
         }
-        let pairs: Vec<(String, String)> =
-            docs.iter().map(|d| (query.to_string(), d.clone())).collect();
+        let pairs: Vec<(String, String)> = docs
+            .iter()
+            .map(|d| (query.to_string(), d.clone()))
+            .collect();
         let encodings = self
             .tokenizer
             .encode_batch(pairs, true)
             .map_err(|e| anyhow::anyhow!("tokenize: {e}"))?;
 
         let batch = encodings.len();
-        let seq_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
+        let seq_len = encodings
+            .iter()
+            .map(|e| e.get_ids().len())
+            .max()
+            .unwrap_or(0);
 
         let mut ids = vec![0i64; batch * seq_len];
         let mut mask = vec![0i64; batch * seq_len];

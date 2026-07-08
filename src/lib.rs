@@ -4,14 +4,18 @@
 //! - [`protocol`]: the validator HTTP wire contract.
 //! - [`catalog`]: the Ditto tool catalog.
 //! - [`datagen`]: deterministic-per-seed dataset generation.
+//! - [`eval`]: the shared tool+memory evaluation loop (CLI + playground).
+//! - [`judge`]: LLM-judge scoring (tool-response and memory QA judges).
 //! - [`scorer`]: turns harness responses into a score report.
 //! - [`baseline`]: the optimizable agent (this is what you tune).
 //! - [`reranker`]: ONNX cross-encoder reranker (production retrieval stage).
 //! - [`seed`]: the bundled LongMemEval seed user (memory retrieval practice).
+//! - [`playground`]: the interactive web playground (fake tools + submit flow).
 
 pub mod baseline;
 pub mod catalog;
 pub mod datagen;
+pub mod eval;
 pub mod judge;
 pub mod playground;
 pub mod protocol;

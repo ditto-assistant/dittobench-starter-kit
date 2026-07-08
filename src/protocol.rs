@@ -1,10 +1,14 @@
 //! DittoBench validator wire contract (HTTP).
 //!
-//! These JSON shapes are byte-compatible with the Go validator
-//! (`pkg/protocol/protocol.go`). The validator on Bittensor subnet 118 (SN118)
-//! POSTs a [`RunRequest`] to the miner's `/run` endpoint per case and expects a
-//! [`RunResponse`]. Datasets ([`Dataset`]) and score reports ([`ScoreReport`])
-//! are produced locally for offline practice and mirror the same field names.
+//! The harness-facing types — [`RunRequest`], [`ToolExecRequest`],
+//! [`ToolExecResponse`], [`ObservedToolCall`], [`RunResponse`] (plus
+//! `SeedRequest`/`SeedResponse` in `seed.rs`) — are byte-compatible with the Go
+//! validator's wire contract (dittobench-api's `pkg/protocol/protocol.go`). The
+//! validator on Bittensor subnet 118 (SN118) POSTs a [`RunRequest`] to the
+//! miner's `/run` endpoint per case and expects a [`RunResponse`]. Datasets
+//! ([`Dataset`]) and score shapes ([`CaseScore`], [`ScoreReport`]) here are a
+//! **partial local subset** produced for offline practice — they mirror the Go
+//! field names but are not the full validator report.
 //!
 //! Field naming: the Go side uses `snake_case` json tags throughout, so every
 //! struct here uses `#[serde(rename_all = "snake_case")]` (which is also the
@@ -95,6 +99,51 @@ pub struct RunRequest {
     pub user_input: String,
     #[serde(default)]
     pub tools: Vec<ToolDefWire>,
+    /// Optional (Phase C, `bench_version` 2): a validator-served mock
+    /// tool-execution URL. When present, a harness should EXECUTE each non-memory
+    /// catalog tool call by POSTing a [`ToolExecRequest`] here and using the
+    /// returned [`ToolExecResponse::result`], instead of stubbing it locally. The
+    /// validator then observes the real trajectory (rather than trusting
+    /// self-report) and can score whether the answer incorporates returned
+    /// content. Absent ⇒ pre-Phase-C behavior (stub tools locally).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_endpoint: Option<String>,
+    /// Optional (Phase C): the memory graph this case must be answered from
+    /// (multi-graph isolation). Mirrors the `user_id` the haystack was seeded
+    /// under; answer only from this user's memory, never leak another user's
+    /// facts. Absent ⇒ the default single-user graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+}
+
+/// One mock tool-execution call a harness POSTs to the validator-served
+/// [`RunRequest::tool_endpoint`] (Go: `ToolExecRequest`). The validator returns a
+/// deterministic, seed-derived [`ToolExecResponse`] and records the call as the
+/// authoritative observed trajectory (Phase C observed execution).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ToolExecRequest {
+    pub case_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub user_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub args: Value,
+    #[serde(default)]
+    pub hop: i32,
+}
+
+/// The mock result the validator returns for a [`ToolExecRequest`] (Go:
+/// `ToolExecResponse`). `result` is the tool output to reason over; `error` is
+/// set (with `result` empty) for a tool the endpoint does not serve (a memory
+/// tool) — treat it like a real tool error.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ToolExecResponse {
+    #[serde(default)]
+    pub result: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub error: String,
 }
 
 /// A tool call the harness made (Go: `ObservedToolCall`).
@@ -127,11 +176,20 @@ pub struct CaseScore {
     pub category: String,
     /// 0..1.
     pub tool_score: f64,
+    /// 0..1 result-usage credit for a result-usage tool case (Phase C): whether
+    /// the answer incorporated the value the executed tool returned. Omitted (0)
+    /// for non-result-usage cases.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub result_usage: f64,
     pub latency_ms: i64,
     pub called: Vec<String>,
     pub expected: Vec<String>,
     #[serde(default)]
     pub notes: Vec<String>,
+}
+
+fn is_zero(x: &f64) -> bool {
+    *x == 0.0
 }
 
 /// The full result of scoring a run (Go: `ScoreReport`, extended with
@@ -167,12 +225,60 @@ mod tests {
                 description: "d".into(),
                 parameters: serde_json::json!({"type": "object"}),
             }],
+            ..Default::default()
         };
         let v = serde_json::to_value(&req).expect("serialize");
         let obj = v.as_object().expect("object");
         for key in ["case_id", "system_prompt", "user_input", "tools"] {
             assert!(obj.contains_key(key), "missing key {key}");
         }
+        // The optional Phase C fields are omitted when absent (byte-compatible
+        // with an old validator that never sends them).
+        assert!(!obj.contains_key("tool_endpoint"));
+        assert!(!obj.contains_key("user_id"));
+    }
+
+    #[test]
+    fn phase_c_run_request_accepts_optional_fields() {
+        // A Phase C RunRequest from the validator deserializes cleanly.
+        let json = r#"{
+            "case_id": "web_result_usage-1-0",
+            "system_prompt": "be helpful",
+            "user_input": "figure on the Veltrix index?",
+            "tools": [],
+            "tool_endpoint": "http://host.docker.internal:49222/tool",
+            "user_id": "colleague"
+        }"#;
+        let req: RunRequest = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            req.tool_endpoint.as_deref(),
+            Some("http://host.docker.internal:49222/tool")
+        );
+        assert_eq!(req.user_id.as_deref(), Some("colleague"));
+    }
+
+    #[test]
+    fn tool_exec_round_trips() {
+        let req = ToolExecRequest {
+            case_id: "c1".into(),
+            user_id: "miner".into(),
+            name: "search_web".into(),
+            args: serde_json::json!({"query": "x"}),
+            hop: 0,
+        };
+        let back: ToolExecRequest =
+            serde_json::from_str(&serde_json::to_string(&req).expect("ser")).expect("de");
+        assert_eq!(req, back);
+        // A served result and an error variant both parse.
+        let ok: ToolExecResponse =
+            serde_json::from_str(r#"{"result":"the Veltrix index reached 3,418 points"}"#)
+                .expect("de");
+        assert_eq!(ok.error, "");
+        let err: ToolExecResponse = serde_json::from_str(
+            r#"{"error":"tool not available via this endpoint: search_memories"}"#,
+        )
+        .expect("de");
+        assert_eq!(err.result, "");
     }
 
     #[test]

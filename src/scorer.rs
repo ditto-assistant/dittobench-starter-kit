@@ -1,7 +1,7 @@
 //! Turns harness `RunResponse`s into a DittoBench `ScoreReport`.
 //!
-//! Mirrors the Ditto backend DittoBench scorer that produced the published
-//! numbers (`backend/pkg/dittobench`):
+//! Mirrors the production DittoBench scorer that produced the published
+//! numbers:
 //!
 //! Tool composite (0–1) = **0.5 × tool-accuracy + 0.5 × response-quality judge**:
 //!   - tool-accuracy = `matched / total_expected`, −0.1 per extra/unexpected call
@@ -14,9 +14,9 @@
 //!
 //! Memory accuracy = an **LLM judge** verdict (yes/no), exactly like the backend
 //! LongMemEval QA judge — supplied here as the boolean in `mem_results`
-//! (see [`crate::judge::Judge::memory_correct`]). The earlier substring proxy
-//! over-scored short/numeric answers; the judge brings memory into the published
-//! ~0.5–0.7 band.
+//! (see [`crate::judge::Judge::memory_correct`]). Memory answers are judged
+//! rather than substring-matched: short/numeric answers over-match as
+//! substrings, so the judge is what keeps memory scores meaningful.
 
 use std::collections::HashMap;
 
@@ -25,8 +25,16 @@ use chrono::Utc;
 use crate::protocol::{CaseScore, Dataset, RunResponse, ScoreReport, ToolCase};
 
 /// Composite weights when memory cases are present.
-const TOOL_WEIGHT: f64 = 0.6;
-const MEMORY_WEIGHT: f64 = 0.4;
+// DittoBench v2 composite (bench_version 2, held pre-launch): 0.5 tool +
+// 0.5 memory. Rebalanced from v1's 0.6/0.4 — memory is the core product value
+// and the raw-pairs seeding tier makes memory_mean the harder axis.
+pub const TOOL_WEIGHT: f64 = 0.5;
+pub const MEMORY_WEIGHT: f64 = 0.5;
+
+/// Per-tool-case blend (Go composite): deterministic tool-accuracy half vs.
+/// the response-quality LLM judge half. Used here and in [`crate::eval`].
+pub const TOOL_ACCURACY_WEIGHT: f64 = 0.5;
+pub const RESPONSE_JUDGE_WEIGHT: f64 = 0.5;
 
 /// Builds the aggregate report.
 ///
@@ -50,7 +58,7 @@ pub fn score(
         // Blend in the response-quality judge half when available (Go composite =
         // 0.5*toolAccuracy + 0.5*judgeQuality). Without a judge, deterministic only.
         if let Some(jq) = tool_judge.get(&c.id) {
-            cs.tool_score = 0.5 * cs.tool_score + 0.5 * jq;
+            cs.tool_score = TOOL_ACCURACY_WEIGHT * cs.tool_score + RESPONSE_JUDGE_WEIGHT * jq;
             cs.notes.push(format!("response-quality judge {jq:.2}"));
         }
         tool_sum += cs.tool_score;
@@ -69,12 +77,16 @@ pub fn score(
         if !mem_results.contains_key(&mc.id) {
             notes.push("no response from harness (error or timeout)".to_string());
         } else if !correct {
-            notes.push(format!("expected answer {:?} not found in final text", mc.expected_answer));
+            notes.push(format!(
+                "judge marked incorrect; expected {:?}",
+                mc.expected_answer
+            ));
         }
         per_case.push(CaseScore {
             case_id: mc.id.clone(),
             category: "memory_recall".to_string(),
             tool_score: s,
+            result_usage: 0.0,
             latency_ms: latency,
             called: Vec::new(),
             expected: vec![mc.expected_answer.clone()],
@@ -115,9 +127,9 @@ pub fn score(
     }
 }
 
-/// Convenience: returns true if `final_text` surfaces `expected` (case
-/// insensitive substring). Exposed so the practice loop and tests use the same
-/// rule.
+/// Case-insensitive substring check. Test-only convenience — real memory
+/// scoring uses the LLM QA judge (see [`crate::judge`]), never substring
+/// matching, because short/numeric answers over-match as substrings.
 pub fn answer_matches(final_text: &str, expected: &str) -> bool {
     if expected.trim().is_empty() {
         return false;
@@ -138,6 +150,7 @@ pub fn score_tool_case(c: &ToolCase, resp: Option<&RunResponse>) -> CaseScore {
         case_id: c.id.clone(),
         category: c.category.clone(),
         tool_score: 0.0,
+        result_usage: 0.0,
         latency_ms,
         called,
         expected,
@@ -145,7 +158,8 @@ pub fn score_tool_case(c: &ToolCase, resp: Option<&RunResponse>) -> CaseScore {
     };
 
     let Some(resp) = resp else {
-        cs.notes.push("no response from harness (error or timeout)".to_string());
+        cs.notes
+            .push("no response from harness (error or timeout)".to_string());
         return cs;
     };
 
@@ -211,8 +225,9 @@ pub fn score_tool_case(c: &ToolCase, resp: Option<&RunResponse>) -> CaseScore {
     cs
 }
 
-/// Median of latency values (0 for empty input).
-fn median(vals: &[i64]) -> i64 {
+/// Median of latency values (0 for empty input). Even-length inputs average the
+/// two middle values (shared with the playground's live scoring).
+pub fn median(vals: &[i64]) -> i64 {
     if vals.is_empty() {
         return 0;
     }
@@ -315,7 +330,13 @@ mod tests {
             tool_cases: vec![tool_case("a", &["search_web"], false)],
             ..Dataset::default()
         };
-        let r = score("run", &ds, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let r = score(
+            "run",
+            &ds,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         assert_eq!(r.per_case[0].tool_score, 0.0);
         assert!(!r.per_case[0].notes.is_empty());
     }
@@ -357,7 +378,12 @@ mod tests {
         let r = score("run", &ds, &tool, &HashMap::new(), &mem);
         assert_eq!(r.tool_mean, 1.0);
         assert_eq!(r.memory_mean, 0.0);
-        assert!((r.composite - 0.6).abs() < 1e-9, "composite = {}", r.composite);
+        // v2 0.5/0.5: 0.5*1.0 + 0.5*0.0 = 0.5.
+        assert!(
+            (r.composite - 0.5).abs() < 1e-9,
+            "composite = {}",
+            r.composite
+        );
     }
 
     #[test]

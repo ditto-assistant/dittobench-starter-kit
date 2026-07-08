@@ -33,6 +33,7 @@
 //!    are fine for tool-calling cases.
 //! =========================================================================
 
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -41,9 +42,7 @@ use async_trait::async_trait;
 use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
 use ditto_harness::db::Db;
-use ditto_harness::memory::{
-    CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions,
-};
+use ditto_harness::memory::{CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions};
 use ditto_harness::models::{ChatModelConfig, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
 use ditto_harness::retrieval::{MlpPredictor, Reranker, Variant, WeightPredictor};
 use ditto_harness::types::{
@@ -53,26 +52,41 @@ use serde_json::{json, Value};
 
 use crate::protocol;
 
-/// A stub tool built from a wire tool definition. It exposes the case's
+/// Shared per-case context for executing catalog tools through the validator's
+/// mock tool endpoint (Phase C observed execution). One is built per `/run` when
+/// the validator advertises `tool_endpoint`, and Arc-cloned into every
+/// [`WireTool`] of that case so they share one HTTP client and a monotonic `hop`
+/// counter (the trajectory order the validator observes).
+struct ToolExecCtx {
+    client: reqwest::Client,
+    endpoint: String,
+    case_id: String,
+    user_id: String,
+    hop: AtomicI32,
+}
+
+/// A catalog tool built from a wire tool definition. It exposes the case's
 /// catalog tool to the model — so the agent can *select* it, which is what the
-/// validator scores — and returns a benign placeholder from `execute()` so
-/// multi-turn cases can proceed.
-///
-/// EXTENSION POINT: replace `WireTool` with real `Tool` implementations to
-/// actually execute tools (web search, image generation, ...). Real tool
-/// results can improve multi-hop tool cases and memory answers.
+/// validator scores. When a [`ToolExecCtx`] is attached (Phase C), `execute()`
+/// runs the tool for real by POSTing to the validator's mock endpoint and
+/// returning the served result, so (a) the validator observes the true
+/// trajectory and (b) the model can incorporate the returned content
+/// (result-usage). Without one it returns a benign placeholder so multi-turn
+/// cases can still proceed.
 struct WireTool {
     def: ToolDefinition,
+    exec: Option<Arc<ToolExecCtx>>,
 }
 
 impl WireTool {
-    fn from_wire(d: &protocol::ToolDefWire) -> WireTool {
+    fn from_wire(d: &protocol::ToolDefWire, exec: Option<Arc<ToolExecCtx>>) -> WireTool {
         WireTool {
             def: ToolDefinition {
                 name: d.name.clone(),
                 description: d.description.clone(),
                 input_schema: d.parameters.clone(),
             },
+            exec,
         }
     }
 }
@@ -83,10 +97,56 @@ impl Tool for WireTool {
         self.def.clone()
     }
 
-    async fn execute(&self, _args: Value) -> HarnessResult<Value> {
+    async fn execute(&self, args: Value) -> HarnessResult<Value> {
+        // Phase C: execute for real through the validator's mock endpoint.
+        if let Some(ctx) = &self.exec {
+            let hop = ctx.hop.fetch_add(1, Ordering::SeqCst);
+            let body = protocol::ToolExecRequest {
+                case_id: ctx.case_id.clone(),
+                user_id: ctx.user_id.clone(),
+                name: self.def.name.clone(),
+                args,
+                hop,
+            };
+            match ctx.client.post(&ctx.endpoint).json(&body).send().await {
+                Ok(resp) => {
+                    // A non-2xx body is not a ToolExecResponse — surface the
+                    // status instead of a misleading decode error.
+                    let status = resp.status();
+                    if !status.is_success() {
+                        let body = resp.text().await.unwrap_or_default();
+                        return Ok(
+                            json!({ "error": format!("tool endpoint returned {status}: {body}") }),
+                        );
+                    }
+                    match resp.json::<protocol::ToolExecResponse>().await {
+                        Ok(r) if !r.result.is_empty() => return Ok(json!({ "result": r.result })),
+                        // The endpoint declined (a memory tool); surface it as a
+                        // tool error the model can react to.
+                        Ok(r) if !r.error.is_empty() => return Ok(json!({ "error": r.error })),
+                        // Both result and error empty: still say something useful.
+                        Ok(_) => {
+                            return Ok(json!({
+                                "error": format!(
+                                    "tool endpoint returned an empty result for {}",
+                                    self.def.name
+                                )
+                            }))
+                        }
+                        Err(err) => {
+                            return Ok(json!({ "error": format!("decode tool result: {err}") }))
+                        }
+                    }
+                }
+                // Endpoint unreachable: degrade to a stub so the case still runs.
+                Err(err) => {
+                    return Ok(json!({ "error": format!("tool endpoint unreachable: {err}") }))
+                }
+            }
+        }
         Ok(json!({
             "status": "ok",
-            "note": "stub result from the practice harness; replace WireTool with a real Tool to execute",
+            "note": "stub result from the practice harness; provide tool_endpoint (Phase C) or a real Tool to execute",
         }))
     }
 }
@@ -117,6 +177,14 @@ pub enum ModelProvider {
 }
 
 impl ModelProvider {
+    /// The configured chat model id (whichever provider serves it).
+    pub fn model_id(&self) -> &str {
+        match self {
+            ModelProvider::OpenRouter { model } => model,
+            ModelProvider::Ollama { model, .. } => model,
+        }
+    }
+
     /// Resolves the provider from environment variables. Defaults to OpenRouter
     /// with a fast tool-capable model; falls back to Ollama if
     /// `DITTOBENCH_PROVIDER=ollama`.
@@ -144,8 +212,12 @@ impl ModelProvider {
 /// clones).
 pub struct Baseline {
     model: Arc<dyn Model>,
+    model_name: String,
     store: Arc<Store>,
     include_memory_tools: bool,
+    /// Shared outbound HTTP client (Phase C tool-endpoint calls). One client
+    /// per Baseline so connections are pooled across cases.
+    http: reqwest::Client,
 }
 
 impl Baseline {
@@ -156,13 +228,17 @@ impl Baseline {
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
     pub async fn from_env() -> anyhow::Result<Baseline> {
-        let db_path = std::env::var("DITTOBENCH_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+        let db_path =
+            std::env::var("DITTOBENCH_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
         let store = Self::open_store(&db_path).await?;
-        let model = Self::build_model(&ModelProvider::from_env())?;
+        let provider = ModelProvider::from_env();
+        let model = Self::build_model(&provider)?;
         Ok(Baseline {
             model,
+            model_name: provider.model_id().to_string(),
             store,
             include_memory_tools: true,
+            http: reqwest::Client::new(),
         })
     }
 
@@ -205,8 +281,8 @@ impl Baseline {
     /// The embedder (Ollama `embeddinggemma`, 768 dims). EXTENSION POINT: swap
     /// for another embedder implementing `ditto_harness::types::Embedder`.
     pub fn build_embedder() -> OllamaEmbedder {
-        let base_url =
-            std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
+        let base_url = std::env::var("OLLAMA_BASE_URL")
+            .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
         OllamaEmbedder::new(base_url)
     }
 
@@ -237,6 +313,12 @@ impl Baseline {
     /// harness with fake tools).
     pub fn model_arc(&self) -> Arc<dyn Model> {
         Arc::clone(&self.model)
+    }
+
+    /// The model id actually configured on this baseline (whatever provider
+    /// serves it) — e.g. for filling the `{MODEL}` slot in a system prompt.
+    pub fn model_name(&self) -> &str {
+        &self.model_name
     }
 
     /// Retrieves the top-k memories for `query` through the full production
@@ -328,6 +410,27 @@ impl Baseline {
     pub async fn run(&self, req: protocol::RunRequest) -> anyhow::Result<protocol::RunResponse> {
         let started = Instant::now();
 
+        // Phase C: the case may be scoped to a specific memory graph (multi-graph
+        // isolation) — answer from that user's memory, defaulting to the kit user.
+        let user_id = req
+            .user_id
+            .clone()
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| USER_ID.to_string());
+
+        // Phase C: when the validator advertises a mock tool endpoint, execute
+        // catalog tools through it (so the validator observes the trajectory and
+        // the model can use returned content). One shared context per case.
+        let exec_ctx = req.tool_endpoint.as_ref().map(|ep| {
+            Arc::new(ToolExecCtx {
+                client: self.http.clone(),
+                endpoint: ep.clone(),
+                case_id: req.case_id.clone(),
+                user_id: user_id.clone(),
+                hop: AtomicI32::new(0),
+            })
+        });
+
         // Expose this case's tool catalog to the model so it can SELECT the
         // right tool (what the validator scores). Built per-run because the
         // catalog arrives on the wire. Memory tools are dropped here when the
@@ -336,8 +439,10 @@ impl Baseline {
         let host_tools: Vec<Arc<dyn Tool>> = req
             .tools
             .iter()
-            .filter(|d| !(self.include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str())))
-            .map(|d| Arc::new(WireTool::from_wire(d)) as Arc<dyn Tool>)
+            .filter(|d| {
+                !(self.include_memory_tools && MEMORY_TOOL_NAMES.contains(&d.name.as_str()))
+            })
+            .map(|d| Arc::new(WireTool::from_wire(d, exec_ctx.clone())) as Arc<dyn Tool>)
             .collect();
 
         let harness = Harness::new(Options {
@@ -351,7 +456,7 @@ impl Baseline {
             .run(
                 ChatRunRequest {
                     prepare: PrepareRequest {
-                        user_id: USER_ID.to_string(),
+                        user_id: user_id.clone(),
                         // user_input drives memory retrieval (the query)...
                         user_input: req.user_input.clone(),
                         system_prompt: req.system_prompt.clone(),

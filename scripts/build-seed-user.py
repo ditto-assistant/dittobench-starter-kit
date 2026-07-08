@@ -6,11 +6,13 @@ This script selects a coherent, variety-balanced slice of the LongMemEval
 starter kit can load directly. The kit re-embeds at load time, so embeddings
 are dropped from every output.
 
-Inputs (READ-ONLY, and NOT committed to the starter kit — they live in the
-ops-log workspace):
+MAINTAINERS ONLY: the inputs below are NOT distributed with the starter kit —
+regenerating the fixture requires the private LongMemEval source data. Miners
+never need to run this; the generated fixture ships under fixtures/seed-user/.
 
-  Base A (default $LME_BASE_A or
-    /Users/omarbarazanji/omar-workspace/ditto-backend-ops-log/longmemeval):
+Inputs (READ-ONLY, not committed to the starter kit):
+
+  Base A ($LME_BASE_A or argv[1]):
       seed_pairs.json         list of {pair_id, prompt, response, ...}
       seed_subjects.json      list of {id, subject_text, description_text,
                                        subject_type, embedding}  (embedding dropped)
@@ -18,15 +20,13 @@ ops-log workspace):
       seed_manifest.json      {fixture_user, question_count, total_pairs,
                                cases:[{question_id, session_to_pairs, pair_count}]}
 
-  Base B (default $LME_BASE_B or
-    /Users/omarbarazanji/omar-workspace/ditto-backend-ops-log/dittobench-testdata/longmemeval):
+  Base B ($LME_BASE_B or argv[2]):
       longmemeval_oracle.json list of {question_id, question_type, question,
                                        answer, question_date, haystack_dates,
                                        haystack_session_ids, haystack_sessions,
                                        answer_session_ids}
 
-Output (default $SEED_OUT or
-  /Users/omarbarazanji/code/omar-workspace/dittobench-starter-kit/fixtures/seed-user):
+Output ($SEED_OUT or argv[3], typically fixtures/seed-user in this repo):
     pairs.json          {pair_id, session_id, timestamp(RFC3339 Z), prompt, response}
     subjects.json       {id, subject_text, description_text}
     subject_links.json  {subject_id, pair_id}
@@ -34,11 +34,11 @@ Output (default $SEED_OUT or
     manifest.json       {fixture_user, generated_from, question_count, pair_count,
                          subject_count, link_count, selected_question_ids}
 
-Paths are overridable via argv (positional: base_a base_b out_dir) or env
+Every path is required, via argv (positional: base_a base_b out_dir) or env
 (LME_BASE_A / LME_BASE_B / SEED_OUT).
 
 Usage:
-    python3 build-seed-user.py [base_a] [base_b] [out_dir]
+    python3 build-seed-user.py <base_a> <base_b> <out_dir>
 """
 
 import json
@@ -46,10 +46,6 @@ import os
 import re
 import sys
 from collections import defaultdict, OrderedDict
-
-DEFAULT_BASE_A = "/Users/omarbarazanji/omar-workspace/ditto-backend-ops-log/longmemeval"
-DEFAULT_BASE_B = "/Users/omarbarazanji/omar-workspace/ditto-backend-ops-log/dittobench-testdata/longmemeval"
-DEFAULT_OUT = "/Users/omarbarazanji/code/omar-workspace/dittobench-starter-kit/fixtures/seed-user"
 
 MAX_QUESTIONS = 50
 PAIRS_SIZE_CAP = 4 * 1024 * 1024  # ~4 MB
@@ -80,10 +76,23 @@ def load_json(path):
         return json.load(f)
 
 
+def required_path(arg_idx, env_var, what):
+    """A required input path, from positional argv or the named env var."""
+    if len(sys.argv) > arg_idx:
+        return sys.argv[arg_idx]
+    value = os.environ.get(env_var)
+    if not value:
+        sys.exit(
+            f"missing {what}: pass it as positional arg {arg_idx} or set ${env_var} "
+            "(inputs are not distributed with the kit — maintainers only)"
+        )
+    return value
+
+
 def main():
-    base_a = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("LME_BASE_A", DEFAULT_BASE_A)
-    base_b = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("LME_BASE_B", DEFAULT_BASE_B)
-    out_dir = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("SEED_OUT", DEFAULT_OUT)
+    base_a = required_path(1, "LME_BASE_A", "the LongMemEval seed fixture dir (base_a)")
+    base_b = required_path(2, "LME_BASE_B", "the LongMemEval oracle dir (base_b)")
+    out_dir = required_path(3, "SEED_OUT", "the output fixtures/seed-user dir")
 
     p = lambda base, name: os.path.join(base, name)
 

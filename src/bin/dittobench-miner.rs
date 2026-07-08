@@ -1,10 +1,14 @@
 //! DittoBench miner CLI.
 //!
 //! Subcommands:
-//!   serve     — HTTP server exposing POST /run + POST /seed + GET /health (validator faces this)
-//!   seed      — load the bundled memory fixture into the local Turso DB
-//!   practice  — run a local dataset through the baseline and print a score report
-//!   submit    — package the repo for submission (real upload is a TODO stub)
+//!   serve       — HTTP server exposing POST /run + POST /seed + GET /health (validator faces this)
+//!   playground  — interactive web UI: chat with the prod-faithful agent over the seed user
+//!   seed-user   — load the bundled LongMemEval seed user into the local Turso DB
+//!   mem-eval    — evaluate memory RETRIEVAL (recall@k) over the seed user; no LLM calls
+//!   evaluate    — score against a FIXED local benchmark (fixed-seed tools + bundled questions)
+//!   practice    — generate a ROTATING dataset, run it through the baseline, print a report
+//!   submit      — package the repo into a submission tarball (upload happens
+//!                 via the playground Submit tab / the ditto CLI — see `submit()`)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,7 +22,7 @@ use axum::{Json, Router};
 use clap::{Parser, Subcommand};
 
 use dittobench_starter_kit::baseline::{Baseline, USER_ID};
-use dittobench_starter_kit::{datagen, protocol, scorer};
+use dittobench_starter_kit::{datagen, eval, protocol, scorer};
 
 #[derive(Parser)]
 #[command(
@@ -180,7 +184,9 @@ async fn seed_handler(
 
 async fn seed_user() -> anyhow::Result<()> {
     let baseline = Baseline::from_env().await?;
-    eprintln!("loading bundled LongMemEval seed user into the vector DB (embeds pairs + subjects)...");
+    eprintln!(
+        "loading bundled LongMemEval seed user into the vector DB (embeds pairs + subjects)..."
+    );
     let stats = dittobench_starter_kit::seed::load_seed_user(baseline.store()).await?;
     println!(
         "seeded user {USER_ID:?}: {} pairs, {} subjects, {} subject links — ready for retrieval",
@@ -208,7 +214,7 @@ async fn mem_eval(k: usize, limit: usize) -> anyhow::Result<()> {
 
     let mut hits = 0usize; // at least one answer pair retrieved
     let mut recall_sum = 0.0f64; // fraction of answer pairs retrieved
-    // per question-type aggregates: (hit_count, recall_sum, n)
+                                 // per question-type aggregates: (hit_count, recall_sum, n)
     let mut by_type: BTreeMap<String, (usize, f64, usize)> = BTreeMap::new();
 
     for (i, c) in cases.iter().enumerate() {
@@ -221,8 +227,7 @@ async fn mem_eval(k: usize, limit: usize) -> anyhow::Result<()> {
         };
         let want: std::collections::HashSet<&str> =
             c.answer_pair_ids.iter().map(String::as_str).collect();
-        let got: std::collections::HashSet<&str> =
-            retrieved.iter().map(String::as_str).collect();
+        let got: std::collections::HashSet<&str> = retrieved.iter().map(String::as_str).collect();
         let found = want.iter().filter(|p| got.contains(*p)).count();
         let recall = if want.is_empty() {
             0.0
@@ -234,7 +239,9 @@ async fn mem_eval(k: usize, limit: usize) -> anyhow::Result<()> {
             hits += 1;
         }
         recall_sum += recall;
-        let e = by_type.entry(c.question_type.clone()).or_insert((0, 0.0, 0));
+        let e = by_type
+            .entry(c.question_type.clone())
+            .or_insert((0, 0.0, 0));
         e.0 += hit as usize;
         e.1 += recall;
         e.2 += 1;
@@ -246,8 +253,14 @@ async fn mem_eval(k: usize, limit: usize) -> anyhow::Result<()> {
     let n = cases.len() as f64;
     println!("\n=== DittoBench memory retrieval report (recall@{k}) ===");
     println!("questions:   {}", cases.len());
-    println!("hit@{k}:      {:.3}   (>=1 answer pair retrieved)", hits as f64 / n);
-    println!("recall@{k}:   {:.3}   (mean fraction of answer pairs retrieved)", recall_sum / n);
+    println!(
+        "hit@{k}:      {:.3}   (>=1 answer pair retrieved)",
+        hits as f64 / n
+    );
+    println!(
+        "recall@{k}:   {:.3}   (mean fraction of answer pairs retrieved)",
+        recall_sum / n
+    );
     println!("\nby question type:");
     for (t, (h, r, cnt)) in &by_type {
         println!(
@@ -267,7 +280,13 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
     let baseline = Baseline::from_env().await?;
 
     // Guard: the static seed user must be loaded (memory questions query it).
-    if baseline.retrieve("hello", 1).await.unwrap_or_default().is_empty() {
+    // A retrieval ERROR (e.g. the embedding backend is down) is not the same
+    // as an empty store — surface it instead of telling the user to re-seed.
+    let probe = baseline
+        .retrieve("hello", 1)
+        .await
+        .context("memory retrieval probe failed (is the retrieval stack up?)")?;
+    if probe.is_empty() {
         anyhow::bail!("seed user not loaded — run `dittobench-miner seed-user` first");
     }
 
@@ -302,55 +321,21 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
         .map(|c| (c.question_id.clone(), c.question_type.clone()))
         .collect();
 
-    // Tool cases: run + response-quality judge.
-    let mut tool_resps: HashMap<String, protocol::RunResponse> = HashMap::new();
-    let mut tool_judge: HashMap<String, f64> = HashMap::new();
-    for c in &ds.tool_cases {
-        let req = protocol::RunRequest {
-            case_id: c.id.clone(),
-            system_prompt: "You are Ditto, a helpful assistant. Use a tool when the user's \
-                request clearly needs one; otherwise just answer."
-                .to_string(),
-            user_input: c.prompt.clone(),
-            tools: dittobench_starter_kit::catalog::catalog(),
-        };
-        match baseline.run(req).await {
-            Ok(resp) => {
-                let called: Vec<String> = resp.tool_calls.iter().map(|t| t.name.clone()).collect();
-                let jq = judge
-                    .tool_response_quality(&c.prompt, &called, &c.expected_behavior, &resp.final_text)
-                    .await;
-                tool_judge.insert(c.id.clone(), jq);
-                tool_resps.insert(c.id.clone(), resp);
-            }
-            Err(err) => eprintln!("tool case {} failed: {err}", c.id),
+    // Shared eval loop: tool accuracy + response-quality judge, memory QA judge.
+    let results = eval::run_suite(&baseline, &judge, &ds, &qtype_by_id, |o| {
+        if o.error {
+            eprintln!("{} case {} failed: {}", o.kind, o.case_id, o.detail);
         }
-    }
+    })
+    .await;
 
-    // Memory questions: run + LLM-judge correctness (like the backend QA judge).
-    let mut mem_results: HashMap<String, (bool, i64)> = HashMap::new();
-    for mc in &ds.memory_cases {
-        let req = protocol::RunRequest {
-            case_id: mc.id.clone(),
-            system_prompt: "You are Ditto. Answer using the user's memories when relevant; \
-                search memories if needed."
-                .to_string(),
-            user_input: mc.question.clone(),
-            tools: dittobench_starter_kit::catalog::catalog(),
-        };
-        match baseline.run(req).await {
-            Ok(resp) => {
-                let qtype = qtype_by_id.get(&mc.id).map(String::as_str).unwrap_or("");
-                let correct = judge
-                    .memory_correct(&mc.question, &mc.expected_answer, &resp.final_text, qtype, false)
-                    .await;
-                mem_results.insert(mc.id.clone(), (correct, resp.latency_ms));
-            }
-            Err(err) => eprintln!("memory case {} failed: {err}", mc.id),
-        }
-    }
-
-    let report = scorer::score(&format!("evaluate-seed{seed}"), &ds, &tool_resps, &tool_judge, &mem_results);
+    let report = scorer::score(
+        &format!("evaluate-seed{seed}"),
+        &ds,
+        &results.tool_resps,
+        &results.tool_judge,
+        &results.mem_results,
+    );
     print_report(&report, &ds);
     eprintln!(
         "\n(inputs are fixed; the model is still stochastic, so scores vary slightly run-to-run.\n the hosted validator rotates a fresh dataset per submission.)"
@@ -390,53 +375,22 @@ async fn practice(n: usize, mem: usize, seed: Option<i64>) -> anyhow::Result<()>
 
     let judge = dittobench_starter_kit::judge::Judge::new(baseline.model_arc());
 
-    // Tool cases: run + response-quality judge (backend composite).
-    let mut tool_resps: HashMap<String, protocol::RunResponse> = HashMap::new();
-    let mut tool_judge: HashMap<String, f64> = HashMap::new();
-    for c in &ds.tool_cases {
-        let req = protocol::RunRequest {
-            case_id: c.id.clone(),
-            system_prompt: "You are Ditto, a helpful assistant. Use a tool when the user's \
-                request clearly needs one; otherwise just answer."
-                .to_string(),
-            user_input: c.prompt.clone(),
-            tools: dittobench_starter_kit::catalog::catalog(),
-        };
-        match baseline.run(req).await {
-            Ok(resp) => {
-                let called: Vec<String> = resp.tool_calls.iter().map(|t| t.name.clone()).collect();
-                let jq = judge
-                    .tool_response_quality(&c.prompt, &called, &c.expected_behavior, &resp.final_text)
-                    .await;
-                tool_judge.insert(c.id.clone(), jq);
-                tool_resps.insert(c.id.clone(), resp);
-            }
-            Err(err) => eprintln!("tool case {} failed: {err}", c.id),
+    // Shared eval loop (datagen memory cases carry no LongMemEval question
+    // type, so the qtype map is empty).
+    let results = eval::run_suite(&baseline, &judge, &ds, &HashMap::new(), |o| {
+        if o.error {
+            eprintln!("{} case {} failed: {}", o.kind, o.case_id, o.detail);
         }
-    }
+    })
+    .await;
 
-    // Memory cases: run + LLM-judge correctness.
-    let mut mem_results: HashMap<String, (bool, i64)> = HashMap::new();
-    for mc in &ds.memory_cases {
-        let req = protocol::RunRequest {
-            case_id: mc.id.clone(),
-            system_prompt: "You are Ditto. Answer using the user's memories when relevant."
-                .to_string(),
-            user_input: mc.question.clone(),
-            tools: dittobench_starter_kit::catalog::catalog(),
-        };
-        match baseline.run(req).await {
-            Ok(resp) => {
-                let correct = judge
-                    .memory_correct(&mc.question, &mc.expected_answer, &resp.final_text, "", false)
-                    .await;
-                mem_results.insert(mc.id.clone(), (correct, resp.latency_ms));
-            }
-            Err(err) => eprintln!("memory case {} failed: {err}", mc.id),
-        }
-    }
-
-    let report = scorer::score(&format!("practice-{seed}"), &ds, &tool_resps, &tool_judge, &mem_results);
+    let report = scorer::score(
+        &format!("practice-{seed}"),
+        &ds,
+        &results.tool_resps,
+        &results.tool_judge,
+        &results.mem_results,
+    );
     print_report(&report, &ds);
     Ok(())
 }
@@ -469,7 +423,10 @@ fn print_report(report: &protocol::ScoreReport, ds: &protocol::Dataset) {
     slow.sort_by(|a, b| b.latency_ms.cmp(&a.latency_ms));
     println!("\nslowest cases:");
     for cs in slow.iter().take(3) {
-        println!("  {:<28} {} ms  score={:.2}", cs.case_id, cs.latency_ms, cs.tool_score);
+        println!(
+            "  {:<28} {} ms  score={:.2}",
+            cs.case_id, cs.latency_ms, cs.tool_score
+        );
     }
 
     let _ = ds; // dataset available for richer reporting if you extend this.
@@ -479,25 +436,28 @@ fn print_report(report: &protocol::ScoreReport, ds: &protocol::Dataset) {
 
 fn submit() -> anyhow::Result<()> {
     let out = "dittobench-submission.tgz";
-    let status = std::process::Command::new("tar")
-        .args([
-            "--exclude=target",
-            "--exclude=*.db",
-            "--exclude=*.tgz",
-            "--exclude=.git",
-            "-czf",
-            out,
-            ".",
-        ])
-        .status()
-        .context("run tar")?;
+    // Never package secrets or local state: `.env` / `.env.*` hold your
+    // OPENROUTER_API_KEY, `*.db` is your local Turso DB and `*.db-*` its
+    // WAL/SHM sidecars. The tarball is uploaded to the platform — keep them out.
+    let excludes = [
+        "target", ".git", "*.tgz", "*.db", "*.db-*", ".env", ".env.*",
+    ];
+    let mut cmd = std::process::Command::new("tar");
+    for pat in excludes {
+        cmd.arg(format!("--exclude={pat}"));
+    }
+    let status = cmd.args(["-czf", out, "."]).status().context("run tar")?;
     anyhow::ensure!(status.success(), "tar failed");
     println!("packaged repository -> {out}");
+    println!("excluded (secrets + local state): {}", excludes.join(", "));
     println!();
-    println!("next steps (TODO: real subnet submission):");
-    println!("  1. Ensure `dittobench-miner serve` is reachable by the validator.");
-    println!("  2. Register your miner hotkey on Bittensor subnet 118.");
-    println!("  3. Upload signed artifacts to the subnet /upload/* endpoints.");
-    println!("     (Signed upload is not yet implemented in this starter kit.)");
+    println!("next steps:");
+    println!("  * Hosted BYOK practice (off-chain): run `dittobench-miner playground` and use");
+    println!("    its Submit tab to score this harness against the hosted validator");
+    println!("    (see README \"Hosted BYOK practice\").");
+    println!("  * On-chain submission (SN118): register your miner hotkey, then upload the");
+    println!("    tarball with the `ditto` miner CLI from the ditto-subnet repo — it pays the");
+    println!("    eval fee on chain and uploads to the platform:");
+    println!("      ditto upload --path {out} --name <name> --coldkey <ck> --hotkey <hk>");
     Ok(())
 }

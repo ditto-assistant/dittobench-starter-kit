@@ -6,11 +6,15 @@
 //! of the off-chain practice loop. Mirrors the Go validator
 //! `internal/datagen`, extended with synthetic memory cases.
 
-use chrono::Utc;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::protocol::{Dataset, MemoryCase, SeedMemory, ToolCase, ToolSpec};
+
+/// Pinned "as-of" stamp for generated datasets — mirrors dittobench-api's
+/// `protocol.DatasetEpoch` (2026-01-01T00:00:00Z). A wall-clock stamp would
+/// break same-seed byte-identical local datasets.
+pub const DATASET_EPOCH_RFC3339: &str = "2026-01-01T00:00:00Z";
 
 /// One kind of tool-calling case and how to render it.
 struct Category {
@@ -165,7 +169,11 @@ const CATEGORIES: &[Category] = &[
     Category {
         name: "settings",
         tool: "set_theme",
-        templates: &["Switch to %s mode.", "Set my theme to %s.", "Change the app theme to %s."],
+        templates: &[
+            "Switch to %s mode.",
+            "Set my theme to %s.",
+            "Change the app theme to %s.",
+        ],
     },
     Category {
         name: "no_tool",
@@ -189,21 +197,86 @@ const CATEGORIES: &[Category] = &[
 /// `(category, prompt, expected_tool, expected_behavior)`.
 const HARD_CASES: &[(&str, &str, &str, &str)] = &[
     // --- routing: pick the RIGHT source ---
-    ("route_link", "Summarize what's on https://example.com/q3-report.html for me.", "read_links", "a specific URL was given; read that page (not a web search)"),
-    ("route_memory", "What did I decide about the database migration last week?", "search_memories", "a past personal decision; search the user's memories, not the web"),
-    ("route_web", "What's the current price of Bitcoin right now?", "search_web", "a current external fact; search the web"),
-    ("route_memory", "Remind me which laptop I said I was planning to buy.", "search_memories", "the user's own stated preference; search memories"),
-    ("route_web", "What are the latest reviews of the new Pixel phone?", "search_web", "current external info; search the web"),
+    (
+        "route_link",
+        "Summarize what's on https://example.com/q3-report.html for me.",
+        "read_links",
+        "a specific URL was given; read that page (not a web search)",
+    ),
+    (
+        "route_memory",
+        "What did I decide about the database migration last week?",
+        "search_memories",
+        "a past personal decision; search the user's memories, not the web",
+    ),
+    (
+        "route_web",
+        "What's the current price of Bitcoin right now?",
+        "search_web",
+        "a current external fact; search the web",
+    ),
+    (
+        "route_memory",
+        "Remind me which laptop I said I was planning to buy.",
+        "search_memories",
+        "the user's own stated preference; search memories",
+    ),
+    (
+        "route_web",
+        "What are the latest reviews of the new Pixel phone?",
+        "search_web",
+        "current external info; search the web",
+    ),
     // --- no tool: answer directly (over-calling is wrong) ---
-    ("answer_direct", "Explain the difference between TCP and UDP.", "", "general knowledge; answer directly without calling a tool"),
-    ("answer_direct", "Brainstorm three name ideas for a coffee shop.", "", "a creative task; answer directly without a tool"),
-    ("answer_direct", "Translate \"good morning, how are you?\" into Spanish.", "", "answer directly; no tool needed"),
-    ("answer_direct", "Write a short haiku about autumn.", "", "answer directly; no tool needed"),
-    ("answer_direct", "What's 18% of 250?", "", "simple arithmetic; answer directly without a tool"),
+    (
+        "answer_direct",
+        "Explain the difference between TCP and UDP.",
+        "",
+        "general knowledge; answer directly without calling a tool",
+    ),
+    (
+        "answer_direct",
+        "Brainstorm three name ideas for a coffee shop.",
+        "",
+        "a creative task; answer directly without a tool",
+    ),
+    (
+        "answer_direct",
+        "Translate \"good morning, how are you?\" into Spanish.",
+        "",
+        "answer directly; no tool needed",
+    ),
+    (
+        "answer_direct",
+        "Write a short haiku about autumn.",
+        "",
+        "answer directly; no tool needed",
+    ),
+    (
+        "answer_direct",
+        "What's 18% of 250?",
+        "",
+        "simple arithmetic; answer directly without a tool",
+    ),
     // --- run vs read: execute_agent_job vs artifacts ---
-    ("run_code", "Clone https://github.com/octocat/Hello-World and run its test suite.", "execute_agent_job", "must actually run code against a repo; dispatch the coding agent"),
-    ("build_app", "Build a working snake game I can play in the browser.", "artifacts", "an interactive HTML app to preview; create an artifact (not a code-run job)"),
-    ("doc_artifact", "Draft a one-page project proposal I can edit later.", "artifacts", "a durable document; create a markdown artifact"),
+    (
+        "run_code",
+        "Clone https://github.com/octocat/Hello-World and run its test suite.",
+        "execute_agent_job",
+        "must actually run code against a repo; dispatch the coding agent",
+    ),
+    (
+        "build_app",
+        "Build a working snake game I can play in the browser.",
+        "artifacts",
+        "an interactive HTML app to preview; create an artifact (not a code-run job)",
+    ),
+    (
+        "doc_artifact",
+        "Draft a one-page project proposal I can edit later.",
+        "artifacts",
+        "a durable document; create a markdown artifact",
+    ),
 ];
 
 fn pick<'a>(rng: &mut StdRng, pool: &'a [&'a str]) -> &'a str {
@@ -232,12 +305,11 @@ fn render(template: &str, filler: &str) -> String {
 
 // --- Memory case generation -------------------------------------------------
 
-/// (topic, question template, answer, fact-prompt, fact-response).
 struct MemoryFact {
     /// Short label for the fact (used in generated case ids / debugging).
     topic: &'static str,
     question: &'static str,
-    /// The keyword/phrase the answer must surface (scored via substring match).
+    /// The expected answer the response must surface (judged by the LLM QA judge).
     answer: &'static str,
     prompt: &'static str,
     response: &'static str,
@@ -331,7 +403,12 @@ pub fn generate(seed: i64, n_tool: usize, n_mem: usize) -> Dataset {
         let (category, prompt, tool, behavior): (String, String, String, String) =
             if rng.gen_bool(0.5) {
                 let h = &HARD_CASES[rng.gen_range(0..HARD_CASES.len())];
-                (h.0.to_string(), h.1.to_string(), h.2.to_string(), h.3.to_string())
+                (
+                    h.0.to_string(),
+                    h.1.to_string(),
+                    h.2.to_string(),
+                    h.3.to_string(),
+                )
             } else {
                 let cat = &CATEGORIES[rng.gen_range(0..CATEGORIES.len())];
                 let template = cat.templates[rng.gen_range(0..cat.templates.len())];
@@ -345,7 +422,12 @@ pub fn generate(seed: i64, n_tool: usize, n_mem: usize) -> Dataset {
                 } else {
                     format!("call {} exactly once", cat.tool)
                 };
-                (cat.name.to_string(), render(template, filler), cat.tool.to_string(), behavior)
+                (
+                    cat.name.to_string(),
+                    render(template, filler),
+                    cat.tool.to_string(),
+                    behavior,
+                )
             };
 
         let mut tc = ToolCase {
@@ -404,7 +486,7 @@ pub fn generate(seed: i64, n_tool: usize, n_mem: usize) -> Dataset {
 
     Dataset {
         seed,
-        generated_at: Utc::now().to_rfc3339(),
+        generated_at: DATASET_EPOCH_RFC3339.to_string(),
         tool_cases,
         memory_cases,
     }
@@ -418,8 +500,10 @@ mod tests {
     fn determinism_same_seed_same_dataset() {
         let a = generate(42, 30, 10);
         let b = generate(42, 30, 10);
-        assert_eq!(a.tool_cases, b.tool_cases);
-        assert_eq!(a.memory_cases, b.memory_cases);
+        // Whole-dataset equality: generated_at is the pinned epoch, so two
+        // same-seed datasets are byte-identical.
+        assert_eq!(a, b);
+        assert_eq!(a.generated_at, DATASET_EPOCH_RFC3339);
     }
 
     #[test]
@@ -461,6 +545,9 @@ mod tests {
         let ds = generate(123, 60, 0);
         let has_tool = ds.tool_cases.iter().any(|c| !c.expected_tools.is_empty());
         let has_no_tool = ds.tool_cases.iter().any(|c| c.expected_tools.is_empty());
-        assert!(has_tool && has_no_tool, "dataset should mix tool/no-tool cases");
+        assert!(
+            has_tool && has_no_tool,
+            "dataset should mix tool/no-tool cases"
+        );
     }
 }
