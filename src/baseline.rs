@@ -197,9 +197,13 @@ impl ModelProvider {
                     .unwrap_or_else(|_| "qwen2.5:7b".to_string()),
             },
             _ => ModelProvider::OpenRouter {
-                // EXTENSION POINT: change this default model.
+                // EXTENSION POINT: change this default model. Defaults to prod
+                // Ditto's chat model, which mirrors `.env.example` and is served
+                // by the hosted validator's key — so a submission with no
+                // DITTOBENCH_MODEL set scores against the validator out of the
+                // box. (Some OpenRouter keys 404 "no endpoints" on anthropic/*.)
                 model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| "anthropic/claude-3.5-haiku".to_string()),
+                    .unwrap_or_else(|_| "google/gemini-3.1-flash-lite".to_string()),
             },
         }
     }

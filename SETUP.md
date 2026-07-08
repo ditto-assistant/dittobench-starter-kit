@@ -39,8 +39,8 @@ cd dittobench-starter-kit
 
 cp .env.example .env
 #   edit .env → paste your key:   OPENROUTER_API_KEY=sk-or-v1-...
-#   (.env.example ships chat model google/gemini-3.1-flash-lite to mirror prod;
-#    the code default is anthropic/claude-3.5-haiku. Embeddings via Ollama.)
+#   (chat model defaults to google/gemini-3.1-flash-lite, matching prod Ditto
+#    and the hosted validator's key; .env.example pins the same. Embeddings via Ollama.)
 
 cargo run -- seed-user      # one-time: load the dummy LongMemEval seed user (embeds pairs + subjects; ~2 min)
 cargo run -- playground     # open http://127.0.0.1:8088 and chat

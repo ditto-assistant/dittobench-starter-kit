@@ -54,9 +54,9 @@ with subjects already synced.
 > Ollama and `.env`.
 
 ```bash
-# 1. Pick a chat model. Default provider is OpenRouter. The code default is
-#    anthropic/claude-3.5-haiku. .env.example ships
-#    google/gemini-3.1-flash-lite to mirror prod Ditto.
+# 1. Pick a chat model. Default provider is OpenRouter, defaulting to
+#    google/gemini-3.1-flash-lite — the same model prod Ditto runs and the
+#    hosted validator's key serves. .env.example pins the same id.
 export OPENROUTER_API_KEY=sk-or-...
 # (optional) export DITTOBENCH_MODEL=<any OpenRouter model id>
 
