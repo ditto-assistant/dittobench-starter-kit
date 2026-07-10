@@ -166,6 +166,18 @@ pub struct RunResponse {
     pub prompt_tokens: i64,
     pub output_tokens: i64,
     pub latency_ms: i64,
+    /// Optional short answer slot: the bare value `final_text` asserts (a
+    /// name, number, or comma-separated list). The validator's deterministic
+    /// grader matches this slot when present and falls back to `final_text`
+    /// containment, so populating it removes prose-phrasing risk. EXTENSION
+    /// POINT: extract it from your agent's output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    /// Optional grounded-decline flag: set true when the asked fact is not in
+    /// memory. Correct on needle-absent cases; abstaining on an answerable
+    /// case scores 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abstain: Option<bool>,
 }
 
 /// The score for one case (Go: `CaseScore`).
@@ -293,9 +305,17 @@ mod tests {
             prompt_tokens: 10,
             output_tokens: 5,
             latency_ms: 42,
+            answer: Some("answer".into()),
+            abstain: None,
         };
         let json = serde_json::to_string(&resp).expect("serialize");
         let back: RunResponse = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(resp, back);
+        // Absent slots deserialize as None (additive-optional wire fields).
+        let legacy: RunResponse =
+            serde_json::from_str(r#"{"final_text":"x","tool_calls":[],"prompt_tokens":0,"output_tokens":0,"latency_ms":0}"#)
+                .expect("legacy deserialize");
+        assert_eq!(legacy.answer, None);
+        assert_eq!(legacy.abstain, None);
     }
 }
