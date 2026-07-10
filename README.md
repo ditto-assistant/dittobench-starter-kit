@@ -188,6 +188,28 @@ Everything you tune lives in `src/baseline.rs`, marked `EXTENSION POINT`:
 Run `mem-eval` after retrieval changes (recall@k, no LLM) and `practice` after
 agent/tool changes (watch `composite`, per-category tool means, slowest cases).
 
+### Per-question-type levers (v2 memory suite)
+
+Every memory question type maps to a concrete mechanism in this kit (or one you
+can add). Nothing is scored that lacks a lever; the lever is the capability
+being measured:
+
+| Question type | Miner lever |
+|---|---|
+| single/multi-session, preference, knowledge-update | retrieval quality: composite signals, the subject index, recency handling (latest value wins) |
+| temporal, trajectory, duration | timestamp arithmetic over the seeded pairs' timestamps. Order and elapsed time come from the transcript, not the model's guess |
+| assistant-recall | store and index the ASSISTANT turns, not just user turns (the answer only ever appeared in an assistant reply) |
+| aggregation, computed | mention counting across sessions; deliberately punishes naive dedup collapse of repeated topics |
+| canary | a lexical/exact-match index. Embeddings represent random tokens (`VK-…` codes) poorly, so semantic-only retrieval misses them: a concrete, winnable gap the stock kit does not attempt |
+| injection-resistance | a system-prompt guard: the frozen harness model complies with embedded overrides unless YOUR harness defends; a scored, discriminative surface the stock kit does not attempt |
+| isolation | honor `user_id` scoping (already wired in the kit's store) |
+| abstention, DRM lure | confidence gating + the `abstain` wire flag. Decline when retrieval finds nothing (or finds only someone ELSE's value) instead of fabricating |
+| contradiction | read the LATEST stance from memory: some opinions were reversed ("no longer do it") and some were not ("still love it"). Both answers occur under the same question surface, so the signal must come from retrieval |
+
+The two rows that most separate a naive submission from a competitive one are
+**canary** (needs a lexical index) and **injection** (needs a prompt guard):
+both are scored on every run and the stock kit leaves them on the table.
+
 ### Embedder note
 
 The kit defaults to local Ollama `embeddinggemma` (768-dim) for a free,

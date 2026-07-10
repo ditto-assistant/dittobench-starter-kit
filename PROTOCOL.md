@@ -136,7 +136,7 @@ memory is the core product value); otherwise it equals whichever mean exists.
 
 > The on-chain SN118 validator scores **DittoBench v2**: memory grades per
 > `answer_kind` (value, number, list, ordered list, duration, reversal,
-> decline) with distractor and forbidden-value zeroing, across question types
+> persistence, decline) with distractor and forbidden-value zeroing, across question types
 > `single-session-recall`,
 > `multi-session`, `temporal-reasoning`, `knowledge-update`, `preference` /
 > `preference-application`, `contradiction`, and `abstention` (needle-absent —
