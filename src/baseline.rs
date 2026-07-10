@@ -153,6 +153,10 @@ impl Tool for WireTool {
 
 /// Default local DB path (overridable via `DITTOBENCH_DB`).
 pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
+/// Chutes OpenAI-compatible inference endpoint.
+pub const CHUTES_BASE_URL: &str = "https://llm.chutes.ai/v1";
+/// Default Chutes model from the public Chutes catalog.
+pub const DEFAULT_CHUTES_MODEL: &str = "deepseek-ai/DeepSeek-V3.2-TEE";
 /// Fixed user id for the single-tenant miner DB.
 pub const USER_ID: &str = "miner";
 
@@ -172,6 +176,12 @@ pub const MEMORY_TOOL_NAMES: &[&str] = &[
 pub enum ModelProvider {
     /// OpenRouter; reads `OPENROUTER_API_KEY` from the environment.
     OpenRouter { model: String },
+    /// Chutes OpenAI-compatible hosted inference.
+    Chutes {
+        base_url: String,
+        api_key: Option<String>,
+        model: String,
+    },
     /// Local Ollama server.
     Ollama { base_url: String, model: String },
 }
@@ -181,6 +191,7 @@ impl ModelProvider {
     pub fn model_id(&self) -> &str {
         match self {
             ModelProvider::OpenRouter { model } => model,
+            ModelProvider::Chutes { model, .. } => model,
             ModelProvider::Ollama { model, .. } => model,
         }
     }
@@ -189,12 +200,24 @@ impl ModelProvider {
     /// with a fast tool-capable model; falls back to Ollama if
     /// `DITTOBENCH_PROVIDER=ollama`.
     pub fn from_env() -> ModelProvider {
-        match std::env::var("DITTOBENCH_PROVIDER").as_deref() {
-            Ok("ollama") => ModelProvider::Ollama {
+        let provider = std::env::var("DITTOBENCH_PROVIDER")
+            .unwrap_or_else(|_| "openrouter".to_string())
+            .to_lowercase();
+        match provider.as_str() {
+            "ollama" => ModelProvider::Ollama {
                 base_url: std::env::var("OLLAMA_BASE_URL")
                     .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string()),
                 model: std::env::var("DITTOBENCH_MODEL")
                     .unwrap_or_else(|_| "qwen2.5:7b".to_string()),
+            },
+            "chutes" => ModelProvider::Chutes {
+                base_url: std::env::var("CHUTES_BASE_URL")
+                    .unwrap_or_else(|_| CHUTES_BASE_URL.to_string()),
+                api_key: std::env::var("CHUTES_API_KEY")
+                    .or_else(|_| std::env::var("OPENAI_API_KEY"))
+                    .ok(),
+                model: std::env::var("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|_| DEFAULT_CHUTES_MODEL.to_string()),
             },
             _ => ModelProvider::OpenRouter {
                 // EXTENSION POINT: change this default model. Defaults to prod
@@ -227,9 +250,11 @@ pub struct Baseline {
 impl Baseline {
     /// Builds the baseline from environment configuration:
     ///   - `DITTOBENCH_DB` (db path, default `./dittobench.db`)
-    ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama`)
+    ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama` | `chutes`)
     ///   - `DITTOBENCH_MODEL` (model id)
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
+    ///   - `CHUTES_API_KEY` or `OPENAI_API_KEY` (required for Chutes)
+    ///   - `CHUTES_BASE_URL` (optional Chutes-compatible base URL)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
     pub async fn from_env() -> anyhow::Result<Baseline> {
         let db_path =
@@ -298,6 +323,20 @@ impl Baseline {
                     "OPENROUTER_API_KEY is not set; export it or set DITTOBENCH_PROVIDER=ollama",
                 )?;
                 ChatModelConfig::openrouter(api_key, model.clone())
+            }
+            ModelProvider::Chutes {
+                base_url,
+                api_key,
+                model,
+            } => {
+                let api_key = api_key
+                    .clone()
+                    .context("CHUTES_API_KEY is not set; export it or set OPENAI_API_KEY")?;
+                ChatModelConfig::OpenAiCompat {
+                    base_url: base_url.clone(),
+                    api_key,
+                    model: model.clone(),
+                }
             }
             ModelProvider::Ollama { base_url, model } => {
                 ChatModelConfig::ollama(base_url.clone(), model.clone())
