@@ -16,7 +16,7 @@ pub mod baseline;
 pub mod catalog;
 pub mod datagen;
 pub mod eval;
-pub mod judge;
+pub mod grade;
 pub mod playground;
 pub mod protocol;
 pub mod reranker;

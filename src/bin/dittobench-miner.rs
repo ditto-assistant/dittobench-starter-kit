@@ -314,15 +314,13 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
         ds.memory_cases.len()
     );
 
-    // LLM judge (mirrors the backend DittoBench scorers).
-    let judge = dittobench_starter_kit::judge::Judge::new(baseline.model_arc());
     let qtype_by_id: HashMap<String, String> = cases
         .iter()
         .map(|c| (c.question_id.clone(), c.question_type.clone()))
         .collect();
 
-    // Shared eval loop: tool accuracy + response-quality judge, memory QA judge.
-    let results = eval::run_suite(&baseline, &judge, &ds, &qtype_by_id, |o| {
+    // Shared eval loop: deterministic judge-free grading (matches on-chain).
+    let results = eval::run_suite(&baseline, &ds, &qtype_by_id, |o| {
         if o.error {
             eprintln!("{} case {} failed: {}", o.kind, o.case_id, o.detail);
         }
@@ -333,7 +331,6 @@ async fn evaluate(n_tools: usize, n_mem: usize, seed: i64) -> anyhow::Result<()>
         &format!("evaluate-seed{seed}"),
         &ds,
         &results.tool_resps,
-        &results.tool_judge,
         &results.mem_results,
     );
     print_report(&report, &ds);
@@ -373,11 +370,9 @@ async fn practice(n: usize, mem: usize, seed: Option<i64>) -> anyhow::Result<()>
         }
     }
 
-    let judge = dittobench_starter_kit::judge::Judge::new(baseline.model_arc());
-
     // Shared eval loop (datagen memory cases carry no LongMemEval question
     // type, so the qtype map is empty).
-    let results = eval::run_suite(&baseline, &judge, &ds, &HashMap::new(), |o| {
+    let results = eval::run_suite(&baseline, &ds, &HashMap::new(), |o| {
         if o.error {
             eprintln!("{} case {} failed: {}", o.kind, o.case_id, o.detail);
         }
@@ -388,7 +383,6 @@ async fn practice(n: usize, mem: usize, seed: Option<i64>) -> anyhow::Result<()>
         &format!("practice-{seed}"),
         &ds,
         &results.tool_resps,
-        &results.tool_judge,
         &results.mem_results,
     );
     print_report(&report, &ds);

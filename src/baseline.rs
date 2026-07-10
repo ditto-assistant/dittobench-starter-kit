@@ -562,6 +562,12 @@ impl Baseline {
             prompt_tokens,
             output_tokens,
             latency_ms,
+            // EXTENSION POINT: populate the answer slot with the bare value
+            // your final_text asserts (and abstain when the fact is not in
+            // memory). The validator grades the slot when present, prose
+            // containment otherwise -- an explicit slot removes phrasing risk.
+            answer: None,
+            abstain: None,
         })
     }
 }

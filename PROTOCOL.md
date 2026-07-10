@@ -113,36 +113,37 @@ calls on served categories are capped at 0.5.
 
 ### Scoring rules (local scorer — on-chain v2 differences below)
 
-Each **tool case** scores `0.5 × tool-accuracy + 0.5 × response-quality`:
+Scoring is judge-free everywhere: deterministic, no LLM, and locally identical
+in kind to the on-chain grader.
 
-- **tool-accuracy** (deterministic):
-  - `matched = Σ min(expected_count, observed_count)` over expected tool names
-  - `base = matched / total_expected`
-  - `-0.1` per unexpected extra call (skipped when `allow_extra_tools`)
-  - `score = clamp(base - penalty, 0, 1)`
-  - no-expected-tool cases score `1.0` iff nothing was called, else `0.0`
-- **response-quality**: an LLM judge scores the final text on helpfulness +
-  accuracy (1–5 each, mean/5 → 0–1). A failed judge run contributes 0; when no
-  judge is run at all, the deterministic half stands alone at full weight.
+Each **tool case** scores its deterministic tool-accuracy:
 
-**Memory accuracy**: an LLM QA judge (LongMemEval-style yes/no) decides whether
-the final text contains the correct answer; `memory_mean` is the fraction judged
-correct. (The case-insensitive substring helper `answer_matches` still exists
-but is used in tests only.)
+- `matched = Σ min(expected_count, observed_count)` over expected tool names
+- `base = matched / total_expected`
+- `-0.1` per unexpected extra call (skipped when `allow_extra_tools`)
+- `score = clamp(base - penalty, 0, 1)`
+- no-expected-tool cases score `1.0` iff nothing was called, else `0.0`
+
+**Memory accuracy**: the deterministic grader (`src/grade.rs`, mirroring the
+validator's public `dittobench-datagen/grade`): the expected value must appear
+in the response's `answer` slot (or `final_text` as fallback) by normalized
+bounded containment, with an exact number-token path for numeric answers.
+Abstaining on an answerable case scores 0.
 
 `composite = 0.5 * tool_mean + 0.5 * memory_mean` when both kinds are present
 (**DittoBench v2** — rebalanced from v1's `0.6 / 0.4` because
 memory is the core product value); otherwise it equals whichever mean exists.
 
-> The on-chain SN118 validator scores **DittoBench v2**: memory is **graded**
-> (`0.7 × correctness + 0.3 × grounding`, deterministic check first then LLM
-> judge, not binary), across question types `single-session-recall`,
+> The on-chain SN118 validator scores **DittoBench v2**: memory grades per
+> `answer_kind` (value, number, list, ordered list, duration, reversal,
+> decline) with distractor and forbidden-value zeroing, across question types
+> `single-session-recall`,
 > `multi-session`, `temporal-reasoning`, `knowledge-update`, `preference` /
 > `preference-application`, `contradiction`, and `abstention` (needle-absent —
 > the right answer is a grounded decline). The memory cases come from a fresh
 > **procedural persona universe** per seed (no fixed corpus to memorize), and a
-> `dataset_sha256` in the score `details` pins the exact dataset. The local
-> judge model differs from the validator's and the hosted dataset rotates,
+> `dataset_sha256` in the score `details` pins the exact dataset. The hosted
+> dataset rotates,
 > so local and on-chain scores differ.
 
 ### On-chain tool grading (differs from the local scorer)

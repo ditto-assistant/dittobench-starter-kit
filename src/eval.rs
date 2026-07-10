@@ -1,5 +1,6 @@
 //! Shared evaluation loop — runs a dataset's tool + memory cases through a
-//! [`Baseline`] and the LLM [`Judge`], collecting the raw per-case results in
+//! [`Baseline`], grading deterministically (judge-free, matching the
+//! validator), and collecting the raw per-case results in
 //! the shapes [`crate::scorer::score`] consumes.
 //!
 //! Used by the `evaluate`/`practice` CLI commands and the playground's live
@@ -8,7 +9,6 @@
 use std::collections::HashMap;
 
 use crate::baseline::Baseline;
-use crate::judge::Judge;
 use crate::protocol::{Dataset, RunRequest, RunResponse};
 
 /// System prompt sent with every tool case.
@@ -43,19 +43,17 @@ pub struct CaseOutcome<'a> {
 #[derive(Default)]
 pub struct SuiteResults {
     pub tool_resps: HashMap<String, RunResponse>,
-    pub tool_judge: HashMap<String, f64>,
     pub mem_results: HashMap<String, (bool, i64)>,
 }
 
-/// Runs every tool + memory case in `ds` through `baseline`: tool accuracy is
-/// scored deterministically ([`crate::scorer::score_tool_case`]) and blended
-/// with the response-quality judge; memory correctness is the LongMemEval QA
-/// judge verdict. `qtype_by_id` maps memory case ids to LongMemEval question
-/// types (missing ⇒ no type-specific judge clause). `on_case` fires after each
-/// case with its outcome.
+/// Runs every tool + memory case in `ds` through `baseline`, grading
+/// deterministically: tool accuracy via [`crate::scorer::score_tool_case`]
+/// (no quality-judge half, matching the validator's judge-free scoring) and
+/// memory correctness via [`crate::grade::memory_correct`]. `qtype_by_id`
+/// labels memory outcomes with their question type. `on_case` fires after
+/// each case with its outcome.
 pub async fn run_suite(
     baseline: &Baseline,
-    judge: &Judge,
     ds: &Dataset,
     qtype_by_id: &HashMap<String, String>,
     mut on_case: impl FnMut(CaseOutcome<'_>),
@@ -63,7 +61,7 @@ pub async fn run_suite(
     let catalog = crate::catalog::catalog();
     let mut out = SuiteResults::default();
 
-    // Tool cases: run + deterministic accuracy + response-quality judge.
+    // Tool cases: run + deterministic trajectory accuracy (the score).
     for c in &ds.tool_cases {
         let req = RunRequest {
             case_id: c.id.clone(),
@@ -75,18 +73,7 @@ pub async fn run_suite(
         let (score, latency, detail, error) = match baseline.run(req).await {
             Ok(resp) => {
                 let cs = crate::scorer::score_tool_case(c, Some(&resp));
-                let jq = judge
-                    .tool_response_quality(
-                        &c.prompt,
-                        &cs.called,
-                        &c.expected_behavior,
-                        &resp.final_text,
-                    )
-                    .await;
-                // composite = tool-accuracy/response-quality blend (the backend
-                // rule; scorer::score applies the same blend).
-                let composite = crate::scorer::TOOL_ACCURACY_WEIGHT * cs.tool_score
-                    + crate::scorer::RESPONSE_JUDGE_WEIGHT * jq;
+                let composite = cs.tool_score;
                 let exp = if cs.expected.is_empty() {
                     "no tool".to_string()
                 } else {
@@ -98,13 +85,12 @@ pub async fn run_suite(
                     cs.called.join(", ")
                 };
                 let latency = resp.latency_ms;
-                out.tool_judge.insert(c.id.clone(), jq);
                 out.tool_resps.insert(c.id.clone(), resp);
                 (
                     composite,
                     latency,
                     format!(
-                        "called [{got}] · expected [{exp}] · tool-acc {:.2}, response-judge {jq:.2}",
+                        "called [{got}] · expected [{exp}] · tool-acc {:.2}",
                         cs.tool_score
                     ),
                     false,
@@ -124,7 +110,8 @@ pub async fn run_suite(
         });
     }
 
-    // Memory cases: run + LLM-judge correctness (like the backend QA judge).
+    // Memory cases: run + deterministic containment grading (judge-free,
+    // matching the validator's value-kind check).
     for mc in &ds.memory_cases {
         let req = RunRequest {
             case_id: mc.id.clone(),
@@ -136,27 +123,24 @@ pub async fn run_suite(
         let qtype = qtype_by_id.get(&mc.id).map(String::as_str).unwrap_or("");
         let (score, latency, detail, error) = match baseline.run(req).await {
             Ok(resp) => {
-                let correct = judge
-                    .memory_correct(
-                        &mc.question,
-                        &mc.expected_answer,
-                        &resp.final_text,
-                        qtype,
-                        false,
-                    )
-                    .await;
+                let correct = crate::grade::memory_correct(
+                    &mc.expected_answer,
+                    resp.answer.as_deref(),
+                    &resp.final_text,
+                    resp.abstain.unwrap_or(false),
+                );
                 out.mem_results
                     .insert(mc.id.clone(), (correct, resp.latency_ms));
                 (
                     if correct { 1.0 } else { 0.0 },
                     resp.latency_ms,
                     format!(
-                        "expected \"{}\" — judge: {}",
+                        "expected \"{}\" — {}",
                         mc.expected_answer,
                         if correct {
-                            "correct ✓"
+                            "matched ✓"
                         } else {
-                            "incorrect ✗"
+                            "not matched ✗"
                         }
                     ),
                     false,

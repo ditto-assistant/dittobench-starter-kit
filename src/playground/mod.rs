@@ -426,13 +426,12 @@ async fn run_scoring(
             job.total = ds.tool_cases.len() + ds.memory_cases.len();
         }
     }
-    let judge = crate::judge::Judge::new(baseline.model_arc());
     let qtype_by_id: HashMap<String, String> = mem_cases
         .iter()
         .map(|c| (c.question_id.clone(), c.question_type.clone()))
         .collect();
 
-    let results = crate::eval::run_suite(&baseline, &judge, &ds, &qtype_by_id, |o| {
+    let results = crate::eval::run_suite(&baseline, &ds, &qtype_by_id, |o| {
         push_case(
             &jobs,
             &job_id,
@@ -450,13 +449,7 @@ async fn run_scoring(
     .await;
 
     // Aggregate exactly like the scorer (v2 composite weights, shared median).
-    let report = crate::scorer::score(
-        "playground",
-        &ds,
-        &results.tool_resps,
-        &results.tool_judge,
-        &results.mem_results,
-    );
+    let report = crate::scorer::score("playground", &ds, &results.tool_resps, &results.mem_results);
 
     let mut j = jobs.lock().expect("score_jobs lock");
     if let Some(job) = j.get_mut(&job_id) {
