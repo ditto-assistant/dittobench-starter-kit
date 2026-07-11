@@ -10,10 +10,10 @@ Returns `200 {"status":"ok"}`.
 
 ### `POST /run`
 The validator POSTs one case at a time. Two optional Phase C fields
-(`tool_endpoint`, `user_id`) may be present — see
-[Phase C](#phase-c--observed-tool-execution-additive-optional) below.
+(`tool_endpoint`, `user_id`) may be present; see
+[Phase C](#phase-c-observed-tool-execution-additive-optional) below.
 
-Request body — `RunRequest`:
+Request body, `RunRequest`:
 ```json
 {
   "case_id": "web_search-42-0001",
@@ -25,21 +25,41 @@ Request body — `RunRequest`:
 }
 ```
 
-Response body — `RunResponse`:
+Response body, `RunResponse`:
 ```json
 {
   "final_text": "Here's what I found...",
   "tool_calls": [ { "name": "search_web", "args": { "query": "quantum computing" }, "hop": 0 } ],
   "prompt_tokens": 1234,
   "output_tokens": 56,
-  "latency_ms": 812
+  "latency_ms": 812,
+  "answer": "quantum error correction",
+  "abstain": false,
+  "confidence": 0.85
 }
 ```
+
+Three optional fields worth wiring (all additive, so omitting them never hurts):
+
+- `answer`: the bare value your `final_text` asserts (a name, a number, a
+  comma-separated list). The deterministic grader matches the slot when
+  present and falls back to prose containment, so populating it removes
+  prose-phrasing risk from grading.
+- `abstain`: set `true` for a grounded decline ("that was never mentioned").
+  It is the primary decline signal; decline phrasing in `final_text` is the
+  fallback. Abstaining on an answerable case scores 0, so gate it on
+  retrieval actually coming up empty.
+- `confidence`: your harness's self-assessed probability in `[0, 1]` that
+  the answer is correct. The validator turns it into a Brier calibration
+  score (`mean((confidence - correct)^2)`, lower is better) published as an
+  unscored leaderboard column. Honest confidence minimizes it, always-1.0
+  does not, and it is never folded into the composite, so a harness that omits
+  it is unaffected. Reporting it well is free credibility on the public board.
 
 ### `POST /seed`
 Before asking memory questions the validator installs a fresh haystack.
 
-Request body — `SeedRequest`:
+Request body, `SeedRequest`:
 ```json
 {
   "user_id": "miner",
@@ -51,32 +71,32 @@ Request body — `SeedRequest`:
 ```
 Respond `200 { "pairs": N, "subjects": N, "links": N }` (counts loaded).
 
-**DittoBench v2 seeding tiers** (the memory side of the benchmark):
-- **Tier A** — `pairs` + `subjects` + `links` are all provided (retrieval in isolation).
-- **Tier B (raw-pairs)** — `subjects: []`, `links: []`: only raw conversation
-  pairs are seeded. Your harness must **build its own subject index** from the
+DittoBench v2 seeding tiers (the memory side of the benchmark):
+- Tier A: `pairs`, `subjects`, and `links` are all provided (retrieval in isolation).
+- Tier B (raw-pairs): `subjects: []`, `links: []`, so only raw conversation
+  pairs are seeded. Your harness must build its own subject index from the
   pairs to route subject-scoped questions. A harness that relies on prepared
   subjects scores materially lower here.
-- **Tier C (staged)** — `/seed` is called repeatedly, each with an incremented
-  `wave`, interleaved with `/run`. Seeding is an idempotent **upsert**: accept
+- Tier C (staged): `/seed` is called repeatedly, each with an incremented
+  `wave`, interleaved with `/run`. Seeding is an idempotent upsert: accept
   each wave and merge. Questions may target facts from any wave already seeded.
 
-## Phase C — observed tool execution (additive-optional)
+## Phase C: observed tool execution (additive-optional)
 
-`RunRequest` may carry two **optional** fields. They are additive: an older
+`RunRequest` may carry two optional fields. They are additive: an older
 validator never sends them, and both shapes serialize identically without them.
 
-- `tool_endpoint` — a validator-served mock tool-execution URL. When present,
-  the harness should **execute** each non-memory catalog tool call by POSTing
+- `tool_endpoint`: a validator-served mock tool-execution URL. When present,
+  the harness should execute each non-memory catalog tool call by POSTing
   a `ToolExecRequest` there and feeding the returned result back to the model,
   instead of stubbing the tool locally. The validator records those calls as
   the authoritative observed trajectory and can grade whether the answer
   incorporates the returned content.
-- `user_id` — the memory graph this case must be answered from (multi-graph
+- `user_id`: the memory graph this case must be answered from (multi-graph
   isolation). Answer only from this user's memory, never leak another user's
-  facts. Absent ⇒ the default single-user graph.
+  facts. Absent means the default single-user graph.
 
-The round-trip per tool call — `ToolExecRequest` (`hop` is the 0-based order of
+The round-trip per tool call is `ToolExecRequest` (`hop` is the 0-based order of
 the call within the case):
 ```json
 { "case_id": "web_result_usage-1-0", "user_id": "colleague", "name": "search_web", "args": { "query": "veltrix index" }, "hop": 0 }
@@ -85,13 +105,13 @@ the call within the case):
 ```json
 { "result": "the Veltrix index reached 3,418 points" }
 ```
-Memory tools are **not** served by the endpoint — it replies with an empty
+Memory tools are not served by the endpoint. It replies with an empty
 `result` and an `error` (e.g. `{"error": "tool not available via this endpoint:
 search_memories"}`); treat that like a real tool error.
 
 On result-usage cases the validator additionally grades whether the final
 answer incorporates the value the executed tool returned, reported per case as
-`CaseScore.result_usage` (0–1).
+`CaseScore.result_usage` (0-1).
 
 A harness that ignores `tool_endpoint` still scores, but self-reported tool
 calls on served categories are capped at 0.5.
@@ -111,12 +131,12 @@ calls on served categories are capped at 0.5.
   (`result_usage` is emitted only on Phase C result-usage cases; omitted when 0)
 - `ScoreReport { run_id, generated_at, composite, tool_mean, memory_mean, median_ms, n, per_case[] }`
 
-### Scoring rules (local scorer — on-chain v2 differences below)
+### Scoring rules (local scorer; on-chain v2 differences below)
 
 Scoring is judge-free everywhere: deterministic, no LLM, and locally identical
 in kind to the on-chain grader.
 
-Each **tool case** scores its deterministic tool-accuracy:
+Each tool case scores its deterministic tool-accuracy:
 
 - `matched = Σ min(expected_count, observed_count)` over expected tool names
 - `base = matched / total_expected`
@@ -124,27 +144,26 @@ Each **tool case** scores its deterministic tool-accuracy:
 - `score = clamp(base - penalty, 0, 1)`
 - no-expected-tool cases score `1.0` iff nothing was called, else `0.0`
 
-**Memory accuracy**: the deterministic grader (`src/grade.rs`, mirroring the
+Memory accuracy uses the deterministic grader (`src/grade.rs`, mirroring the
 validator's public `dittobench-datagen/grade`): the expected value must appear
 in the response's `answer` slot (or `final_text` as fallback) by normalized
 bounded containment, with an exact number-token path for numeric answers.
 Abstaining on an answerable case scores 0.
 
 `composite = 0.5 * tool_mean + 0.5 * memory_mean` when both kinds are present
-(**DittoBench v2** — rebalanced from v1's `0.6 / 0.4` because
-memory is the core product value); otherwise it equals whichever mean exists.
+(DittoBench v2, rebalanced from v1's `0.6 / 0.4` because memory is the core
+product value); otherwise it equals whichever mean exists.
 
-> The on-chain SN118 validator scores **DittoBench v2**: memory grades per
+> The on-chain SN118 validator scores DittoBench v2: memory grades per
 > `answer_kind` (value, number, list, ordered list, duration, reversal,
-> persistence, decline) with distractor and forbidden-value zeroing, across question types
-> `single-session-recall`,
-> `multi-session`, `temporal-reasoning`, `knowledge-update`, `preference` /
-> `preference-application`, `contradiction`, and `abstention` (needle-absent —
-> the right answer is a grounded decline). The memory cases come from a fresh
-> **procedural persona universe** per seed (no fixed corpus to memorize), and a
-> `dataset_sha256` in the score `details` pins the exact dataset. The hosted
-> dataset rotates,
-> so local and on-chain scores differ.
+> persistence, decline) with distractor and forbidden-value zeroing, across
+> question types `single-session-recall`, `multi-session`, `temporal-reasoning`,
+> `knowledge-update`, `preference` / `preference-application`, `contradiction`,
+> and `abstention` (needle-absent, where the right answer is a grounded
+> decline). The memory cases come from a fresh procedural persona universe per
+> seed (no fixed corpus to memorize), and a `dataset_sha256` in the score
+> `details` pins the exact dataset. The hosted dataset rotates, so local and
+> on-chain scores differ.
 
 ### On-chain tool grading (differs from the local scorer)
 
@@ -155,13 +174,17 @@ The deterministic half of each tool case is graded on-chain as:
 ```
 
 On observed-execution (Phase C) runs the composite is additionally multiplied
-by a **tool-efficiency factor** bounded to `[0.85, 1.0]`: the first extra call
-is free, then the penalty saturates.
+by a tool-efficiency factor bounded to `[0.85, 1.0]`: the first extra call
+is free, then the penalty saturates. A separate consistency factor (also bounded
+to `[0.85, 1.0]`) applies when the run includes metamorphic invariance cases,
+the same fact asked several ways: answering the group inconsistently across
+phrasings costs a bounded fraction of the composite, so a phrasing-brittle
+harness scores below a grounded one.
 
 ### On-chain timeouts
 
 | Call | Ceiling |
 | --- | --- |
-| `GET /health` (container start → healthy) | 10 s |
-| `POST /run` (per case — a miss scores 0) | 60 s |
+| `GET /health` (container start to healthy) | 10 s |
+| `POST /run` (per case, a miss scores 0) | 60 s |
 | `POST /seed` (per wave) | 5 min |
