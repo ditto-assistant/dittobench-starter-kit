@@ -172,23 +172,53 @@ the highest-value change you can make.
 
 ## How to optimize
 
-Everything you tune lives in `src/baseline.rs`, marked `EXTENSION POINT`:
+Everything you tune lives in `src/baseline.rs`, marked `EXTENSION POINT`.
+Scoring locks the chat model (see *What isn't scored, and why* below), so
+the levers that move your scored composite are retrieval, the prompt, and tools:
 
-1. Model choice: swap the OpenRouter model id, use Chutes hosted
-  inference, or go local with Ollama/vLLM. The single biggest lever on both
-  accuracy and latency.
-2. System prompt: augment the per-case prompt with a tool-use policy and
-  abstention rules so the agent picks the right tool (and *no* tool when it
-   shouldn't).
-3. Retrieval / memory: the production stack is wired and active, including the
+1. Retrieval / memory: the production stack is wired and active, including the
   weight-predictor MLP, composite V2, and the cross-encoder reranker
    (`open_store`). Tune it by retraining/swapping `fixtures/models/mlp-weights.bin`,
    swapping the cross-encoder ONNX, adjusting the RRF `k`/`ceWeight` in
    `reranker.rs`, or changing `candidate_pool_size`/`variant`/limits. Measure
-   with `mem-eval` (`recall@k`).
-4. Tools: the baseline registers the per-case tool catalog as stub tools so
+   with `mem-eval` (`recall@k`). Memory is the harder half of the composite and
+   retrieval recall is the main bottleneck, so this is the biggest scored lever.
+2. System prompt: augment the per-case prompt with a tool-use policy and
+  abstention rules so the agent picks the right tool (and *no* tool when it
+   shouldn't).
+3. Tools: the baseline registers the per-case tool catalog as stub tools so
   the agent can *select* the right one (what the validator scores). Add real
    host `Tool` implementations (`WireTool` → your own) to execute tools.
+
+### What isn't scored, and why
+
+Two things you might expect to tune do not affect your score: the model and
+latency. Both are held out on purpose.
+
+Model. Every miner is scored on the same frozen model. A scored crate run builds
+your image and serves it under the lock: the validator's relay overrides
+`DITTOBENCH_MODEL` and serves Qwen3-32B in a TEE regardless of what `baseline.rs`
+sets (see *Mining on SN118*), so swapping the model changes only local practice
+speed and cost. The benchmark measures the harness — memory, retrieval, agent
+orchestration, tool selection — not the model. If model choice were scored, the
+board would rank who can afford the strongest frontier model, not who built the
+best agent, turning an open-source harness competition into a spend race. One
+frozen open-weight model holds that variable constant, so score gaps reflect
+harness quality and every miner is scored under identical, attestable conditions:
+the TEE proves the locked model actually ran, so no one can quietly swap in a
+stronger one. Keep the kit default (`qwen/qwen3-32b`, the same weights) so
+practice tracks scoring.
+
+Latency. Reported as `median_ms` on the leaderboard, never scored. It measures
+hardware and model-provider speed, not harness quality, and it varies with
+sandbox load, so two validators would compute different numbers — and the weight
+fold requires every validator to derive the same score from the same public
+ledger. Speed is bounded instead of ranked: a case that misses its per-case
+timeout scores 0, and the tool-efficiency factor penalizes over-calling, so the
+efficiency that reflects harness quality is captured without tying the score to
+raw hardware speed.
+
+Put your effort into the three levers above.
 
 Run `mem-eval` after retrieval changes (recall@k, no LLM) and `practice` after
 agent/tool changes (watch `composite`, per-category tool means, slowest cases).
@@ -277,11 +307,12 @@ then scores it. A submission is only valid if it keeps this contract intact:
 
 ### What you're free to change
 
-Everything else is yours: `baseline.rs` (model, system prompt, retrieval knobs,
-tools, described in *How to optimize* above), any other `src/` file, added crate
-dependencies, your own `fixtures/models/` weights, even the `Dockerfile` build
-steps. Restructure the crate however you like, as long as `docker build .`
-still produces a container serving that protocol on :8080.
+Everything else is yours: `baseline.rs` (system prompt, retrieval knobs, and
+tools — the scored levers in *How to optimize* above — plus the model, which only
+affects local practice), any other `src/` file, added crate dependencies, your
+own `fixtures/models/` weights, even the `Dockerfile` build steps. Restructure
+the crate however you like, as long as `docker build .` still produces a
+container serving that protocol on :8080.
 
 ## Mining on SN118
 
@@ -372,7 +403,8 @@ arriving at similar prompts or structure is fine. Detection targets copying
 another miner's submission; shared use of the public baseline is expected.
 First-seen protects the original author over a later uploader. Forking a leaked
 crate and renaming its symbols does not earn. Differentiate for real: change
-the model, prompt, retrieval, or tools (see *How to optimize*).
+the prompt, retrieval, or tools (see *How to optimize*). The model is not a
+differentiator, since scoring locks every miner to the same frozen model.
 
 11. Hardware. The reference stack runs on CPU: Ollama `embeddinggemma`
 (~1 GB), the TinyBERT ONNX reranker, embedded SQLite. 8 GB RAM is
@@ -388,14 +420,10 @@ the blockquote in `[PROTOCOL.md](PROTOCOL.md)`.
 - Arguments weigh as much as selection on-chain. The on-chain
 deterministic tool grade is `0.4 name F1 + 0.4 argument F1 + 0.2 trajectory`
 (see `[PROTOCOL.md](PROTOCOL.md)`). Only the *local* scorer is name-centric.
-- Latency is not scored. Timeouts score 0. A latency term would measure
-hardware and model-provider speed rather than harness quality, and it varies
-with sandbox load, so it would break score reproducibility across validators
-(the weight fold requires every validator to compute the same number from
-the same ledger). Speed is bounded instead by the per-case timeout (a case
-that exceeds it returns no response and scores 0) and the tool-efficiency
-multiplier on observed runs (see `[PROTOCOL.md](PROTOCOL.md)`). `median_ms`
-is published on the leaderboard. Measure with `practice`.
+- Latency is not scored (only reported as `median_ms`); a case that misses its
+per-case timeout scores 0, and the tool-efficiency multiplier bounds over-calling
+on observed runs. The rationale is in *What isn't scored, and why*. Measure with
+`practice`.
 - Memory needs the seed user loaded + Ollama embeddings. Run `seed-user`
 first. If `mem-eval` reports `recall@k: 0.000`, see
 `[SETUP.md](SETUP.md)` → *Troubleshooting*.
