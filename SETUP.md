@@ -79,7 +79,8 @@ Fully local (no API key): set `DITTOBENCH_PROVIDER=ollama` and `DITTOBENCH_MODEL
 
 Chutes hosted inference: set `DITTOBENCH_PROVIDER=chutes`,
 `CHUTES_API_KEY=cpk_...`, and optionally `CHUTES_BASE_URL`; the default Chutes
-model is `deepseek-ai/DeepSeek-V3.2-TEE`.
+model is `deepseek-ai/DeepSeek-V3.2-TEE`. Set `DITTOBENCH_MODEL=Qwen/Qwen3-32B-TEE`
+to practice on the exact model the validator's relay serves when scoring.
 
 ---
 

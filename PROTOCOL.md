@@ -165,7 +165,7 @@ product value); otherwise it equals whichever mean exists.
 > `details` pins the exact dataset. The hosted dataset rotates, so local and
 > on-chain scores differ.
 
-### On-chain tool grading (differs from the local scorer)
+### On-chain tool grading and composite factors (differ from the local scorer)
 
 The deterministic half of each tool case is graded on-chain as:
 
@@ -173,13 +173,25 @@ The deterministic half of each tool case is graded on-chain as:
 0.4 × tool-name F1  +  0.4 × argument F1  +  0.2 × trajectory/order credit
 ```
 
-On observed-execution (Phase C) runs the composite is additionally multiplied
-by a tool-efficiency factor bounded to `[0.85, 1.0]`: the first extra call
-is free, then the penalty saturates. A separate consistency factor (also bounded
-to `[0.85, 1.0]`) applies when the run includes metamorphic invariance cases,
-the same fact asked several ways: answering the group inconsistently across
-phrasings costs a bounded fraction of the composite, so a phrasing-brittle
-harness scores below a grounded one.
+The on-chain composite (`0.5 × tool_mean + 0.5 × memory_mean`) is then multiplied
+by up to three bounded integrity factors. Each is `1.0` (no effect) when its
+trigger is absent, so accuracy stays dominant and every factor is a pure function
+of already-published per-case results (re-derivable from the run details):
+
+- Tool efficiency (observed / Phase C runs): bounded to `[0.85, 1.0]`. The first
+  extra tool call is free, then the over-call penalty saturates.
+- Canary integrity (every run): a per-run seed-derived nonce is planted in the
+  conversation and one memory case asks for it. An honest recall miss (the nonce
+  is neither surfaced nor leaked) is a bounded `×0.85`; surfacing the planted
+  decoy nonce — a cross-user leak — is a hard `×0.5` disqualifier that easy recall
+  elsewhere cannot buy back. A harness with a lexical nonce index passes and is
+  unaffected. (The canary is also one graded memory case in `memory_mean`.)
+- Metamorphic consistency (runs with invariance families): bounded to
+  `[0.85, 1.0]`. Each family is one fact asked several ways; a full run carries
+  several families. The factor is `1 − 0.15 × (fraction of families answered
+  inconsistently)`, so a phrasing-brittle harness that splits families scores
+  below a grounded one, while answering every sibling of a family alike leaves it
+  at `1.0`.
 
 ### On-chain timeouts
 
