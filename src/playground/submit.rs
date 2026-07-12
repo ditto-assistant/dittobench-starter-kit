@@ -15,7 +15,7 @@ use super::AppState;
 /// startup). The playground backend makes the outbound call so the browser
 /// never has to (avoids CORS), and attaches the BYOK OpenRouter key.
 ///
-/// By default this targets the **official hosted practice validator** (BYOK) so
+/// By default this targets the official hosted practice validator (BYOK) so
 /// miners can score against a fresh anti-cheat dataset. Pointing
 /// `DITTOBENCH_API_URL` at a localhost api is internal dev only.
 #[derive(Clone)]
@@ -54,17 +54,17 @@ impl SubmitConfig {
 
 #[derive(Deserialize)]
 pub(super) struct SubmitReq {
-    /// "small" | "medium" | "full" — passed straight through to the api.
+    /// "small" | "medium" | "full", passed straight through to the api.
     #[serde(default)]
     run_size: String,
-    /// "local" (default) runs against a already-running harness (skips the
-    /// Docker build — fast iteration); "crate" has the validator clone + build
+    /// "local" (default) runs against an already-running harness (skips the
+    /// Docker build for fast iteration); "crate" has the validator clone + build
     /// this crate in Docker (the real SN118 flow).
     #[serde(default)]
     target: String,
 }
 
-/// `POST /api/submit` — forward a submission to `<DITTOBENCH_API_URL>/v1/submit`
+/// `POST /api/submit`: forward a submission to `<DITTOBENCH_API_URL>/v1/submit`
 /// and return the api's `{run_id, poll}` to the browser. The backend makes the
 /// call so the browser avoids CORS. The `target` selects the local running
 /// harness (fast) or a full Docker crate build.
@@ -77,8 +77,10 @@ pub(super) async fn submit_start_handler(
         _ => "small".to_string(),
     };
     let url = format!("{}/v1/submit", state.submit.api_url.trim_end_matches('/'));
-    // BYOK: forward the miner's OpenRouter key (from env) so the hosted validator
-    // can run the generator + judge. The key never touches the browser.
+    // BYOK: forward the miner's OpenRouter key (from env). It pays for model
+    // inference on the legacy no-lock crate path; generation is non-LLM and
+    // scoring is judge-free, so the validator otherwise runs no model. The key
+    // never touches the browser.
     let key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     let mut body = if req.target == "crate" {
         json!({
@@ -105,7 +107,7 @@ pub(super) async fn submit_start_handler(
     }
 }
 
-/// `GET /api/submit/:id` — proxy `GET <DITTOBENCH_API_URL>/v1/runs/:id` and
+/// `GET /api/submit/:id`: proxy `GET <DITTOBENCH_API_URL>/v1/runs/:id` and
 /// return the run's JSON (status, stage, progress, partial cases, report).
 pub(super) async fn submit_poll_handler(
     State(state): State<AppState>,

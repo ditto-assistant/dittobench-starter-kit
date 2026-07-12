@@ -39,8 +39,9 @@ cd dittobench-starter-kit
 
 cp .env.example .env
 #   edit .env, paste your key:   OPENROUTER_API_KEY=sk-or-v1-...
-#   (chat model defaults to google/gemini-3.1-flash-lite, matching prod Ditto
-#    and the hosted validator's key; .env.example pins the same. Embeddings via Ollama.)
+#   (chat model defaults to qwen/qwen3-32b, the on-chain scored model;
+#    .env.example pins the same. Scoring locks to Qwen3-32B in a TEE and
+#    overrides this. Embeddings via Ollama.)
 
 cargo run -- seed-user      # one-time: load the dummy LongMemEval seed user (embeds pairs + subjects; ~2 min)
 cargo run -- playground     # open http://127.0.0.1:8088 and chat
@@ -69,7 +70,7 @@ cargo run -- serve --port 8080   # expose GET /health, POST /run, POST /seed for
 ```ini
 OPENROUTER_API_KEY=sk-or-v1-...          # chat model key
 DITTOBENCH_PROVIDER=openrouter           # or `ollama` locally (free), or `chutes` hosted
-DITTOBENCH_MODEL=google/gemini-3.1-flash-lite   # mirrors prod; provider-specific model id
+DITTOBENCH_MODEL=qwen/qwen3-32b          # the on-chain scored model; provider-specific id
 OLLAMA_BASE_URL=http://localhost:11434   # embeddings (and ollama chat) endpoint
 DITTOBENCH_DB=./dittobench.db            # local Turso DB; keep the same path across seed-user + commands
 ```
@@ -99,4 +100,4 @@ against a fresh rotating dataset. Full steps: README, *Hosted BYOK practice*.
 
 - `mem-eval` reports `recall@k: 0.000`: run `seed-user` first, and confirm `ollama serve` + `ollama pull embeddinggemma`, and that `DITTOBENCH_DB` matches what you seeded.
 - `feature edition2024 is required`: update Rust (`rustup update`); the harness needs >= 1.85.
-- Playground reply is empty or over-calls a tool: the prod default `gemini-3.1-flash-lite` is a lite model; set a stronger `DITTOBENCH_MODEL` in `.env`.
+- Playground reply is empty or over-calls a tool: if `DITTOBENCH_MODEL` is a lite model (e.g. `gemini-3.1-flash-lite`), set a stronger one in `.env`.

@@ -43,7 +43,7 @@ use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
 use ditto_harness::db::Db;
 use ditto_harness::memory::{CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions};
-use ditto_harness::models::{ChatModelConfig, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
+use ditto_harness::models::{ChatModelConfig, ModelParams, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
 use ditto_harness::retrieval::{MlpPredictor, Reranker, Variant, WeightPredictor};
 use ditto_harness::types::{
     ChatMessage, Content, Embedder, Model, Result as HarnessResult, Tool, ToolDefinition,
@@ -220,13 +220,13 @@ impl ModelProvider {
                     .unwrap_or_else(|_| DEFAULT_CHUTES_MODEL.to_string()),
             },
             _ => ModelProvider::OpenRouter {
-                // EXTENSION POINT: change this default model. Defaults to prod
-                // Ditto's chat model, which mirrors `.env.example` and is served
-                // by the hosted validator's key — so a submission with no
-                // DITTOBENCH_MODEL set scores against the validator out of the
-                // box. (Some OpenRouter keys 404 "no endpoints" on anthropic/*.)
+                // EXTENSION POINT: change this default model. It sets only LOCAL
+                // practice runs and defaults to the on-chain scored model.
+                // Scoring locks inference to Qwen3-32B in a TEE (Chutes
+                // Qwen/Qwen3-32B-TEE) and overrides whatever a submission sets
+                // here. (Some OpenRouter keys 404 "no endpoints" on anthropic/*.)
                 model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| "google/gemini-3.1-flash-lite".to_string()),
+                    .unwrap_or_else(|_| "qwen/qwen3-32b".to_string()),
             },
         }
     }
@@ -342,8 +342,17 @@ impl Baseline {
                 ChatModelConfig::ollama(base_url.clone(), model.clone())
             }
         };
+        // Deterministic decoding: a frozen reference model must answer phrasing
+        // twins identically (metamorphic gate) and be stable run-to-run. temp 0
+        // removes sampling noise and a fixed seed gives run-to-run reproducibility
+        // on providers that honor it (OpenAI-compatible, OpenRouter, Chutes), so
+        // the noise floor collapses; `None` max_tokens keeps the provider default.
         config
-            .build()
+            .build_with_params(ModelParams {
+                temperature: Some(0.0),
+                max_tokens: None,
+                seed: Some(42),
+            })
             .map_err(|err| anyhow::anyhow!("build chat model: {err}"))
     }
 
@@ -512,13 +521,18 @@ impl Baseline {
                             content: vec![Content::text(req.user_input.clone())],
                             ..ChatMessage::default()
                         }],
-                        // Production retrieval config (mirror 1:1): composite V2
-                        // (7 signals + scale), candidate pool 50, MLP-predicted
-                        // weights + cross-encoder rerank are wired on the Store.
-                        // EXTENSION POINT: retrieval tuning.
+                        // Production retrieval config: composite V2 (7 signals +
+                        // scale), MLP-predicted weights + cross-encoder rerank are
+                        // wired on the Store. long_term_limit sets how many ranked
+                        // memories are injected into context; the default (8) is
+                        // too shallow for a large haystack (a specific needle, e.g.
+                        // the canary nonce, ranks past 8 among 100+ pairs and never
+                        // reaches the model). A deeper pool + more injected context
+                        // lifts recall. EXTENSION POINT: retrieval tuning.
                         use_composite: true,
                         variant: Variant::V2,
-                        candidate_pool_size: 50,
+                        candidate_pool_size: 100,
+                        long_term_limit: 24,
                         ..PrepareRequest::default()
                     },
                     // One tool call per case is the scored unit; allow a few

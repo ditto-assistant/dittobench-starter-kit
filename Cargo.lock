@@ -932,7 +932,7 @@ dependencies = [
 [[package]]
 name = "ditto-harness"
 version = "0.1.0"
-source = "git+https://github.com/ditto-assistant/ditto-harness?rev=41bb639727ea6ef6b1cbcf701270dee3cf10d871#41bb639727ea6ef6b1cbcf701270dee3cf10d871"
+source = "git+https://github.com/ditto-assistant/ditto-harness?rev=c3caa8e2c19f8a41a0610b9f7db774f97643dd9c#c3caa8e2c19f8a41a0610b9f7db774f97643dd9c"
 dependencies = [
  "async-trait",
  "chrono",

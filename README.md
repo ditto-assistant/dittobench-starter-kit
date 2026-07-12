@@ -54,9 +54,11 @@ with subjects already synced.
 > Ollama and `.env`.
 
 ```bash
-# 1. Pick a chat model. Default provider is OpenRouter, defaulting to
-#    google/gemini-3.1-flash-lite, the same model prod Ditto runs and the
-#    hosted validator's key serves. .env.example pins the same id.
+# 1. Pick a chat model for LOCAL practice. Default provider is OpenRouter,
+#    defaulting to qwen/qwen3-32b, the on-chain scored model (matches
+#    .env.example). On-chain scoring locks inference to Qwen3-32B served in a
+#    TEE (Chutes Qwen/Qwen3-32B-TEE) and overrides your model, so the default
+#    already matches scoring conditions.
 export OPENROUTER_API_KEY=sk-or-...
 # (optional) export DITTOBENCH_MODEL=<any OpenRouter model id>
 
@@ -90,9 +92,9 @@ cargo run -- serve --port 8080
 
 The interactive playground is a chat UI wired to a 1:1 production-Ditto agent:
 the v2 system prompt + persona + tool-use policy, the model set by
-`DITTOBENCH_MODEL` (`.env.example` ships prod's
-`google/gemini-3.1-flash-lite`), the full tool catalog, and real memory
-retrieval + cross-encoder rerank over the seed user. Action tools
+`DITTOBENCH_MODEL` (`.env.example` ships `qwen/qwen3-32b`, the scored model; set
+`google/gemini-3.1-flash-lite` to mirror prod Ditto's model), the full tool
+catalog, and real memory retrieval + cross-encoder rerank over the seed user. Action tools
 (search_web, create_image, agent jobs, settings, …) return fake-but-plausible
 results so you can exercise tool-calling without real integrations. Memory
 tools are real and query the seed user.
@@ -115,7 +117,7 @@ below.
 
 - `evaluate` (local, fixed): scores your submission against the same inputs every run: the static seed user, the same bundled LongMemEval questions, and a fixed-seed tool set. Inputs are reproducible and model output is still stochastic.
 - `practice` (local, rotating): re-rolls prompts per run, but from a small fixed template pool (10 memory facts). It varies wording, not substance, and never exercises the seeding tiers/waves.
-- Hosted validator (BYOK): generates a fresh random dataset per submission, as the on-chain SN118 validator does. Drive it from the playground's Submit tab (below). It is the only pre-chain rehearsal of Tier B/C seeding and the real question mix.
+- Hosted validator: generates a fresh random dataset per submission, like the on-chain SN118 validator, and is the only pre-chain rehearsal of Tier B/C seeding and the real question mix. Drive it from the playground's Submit tab (below). Scoring runs under the locked model, so keep `DITTOBENCH_MODEL` at the kit default (`qwen/qwen3-32b`), which on-chain scoring serves in a TEE. A crate submission is built and run under the hard lock; a harness_url submission uses your harness's configured model, so leave the default in place.
 
 Use `evaluate` to develop.
 
@@ -128,8 +130,10 @@ The hosted validator is available. The playground's Submit tab drives it:
 2. Set `DITTOBENCH_HARNESS_URL` in `.env` to the public URL.
   `[.env.example](.env.example)` ships the official `DITTOBENCH_API_URL`.
 3. `cargo run -- playground` → open the Submit tab and pick a run size.
-  Your `OPENROUTER_API_KEY` is forwarded per request to pay your harness's model
-   inference (BYOK). The validator stores no keys.
+  Your harness calls the locked model (Qwen3-32B, the kit default) and your
+  `OPENROUTER_API_KEY` pays for that inference; BYOK means your key, not your
+  choice of model. The validator stores no keys. Leave `DITTOBENCH_MODEL` at the
+  default so practice matches scoring.
 
 Two targets: local (your `serve` exposed publicly, as above) or crate
 (the validator builds your repo from a git URL, which must be publicly
