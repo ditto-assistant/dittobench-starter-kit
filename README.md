@@ -199,8 +199,8 @@ Model. Every miner is scored on the same frozen model. A scored crate run builds
 your image and serves it under the lock: the validator's relay overrides
 `DITTOBENCH_MODEL` and serves Qwen3-32B in a TEE regardless of what `baseline.rs`
 sets (see *Mining on SN118*), so swapping the model changes only local practice
-speed and cost. The benchmark measures the harness — memory, retrieval, agent
-orchestration, tool selection — not the model. If model choice were scored, the
+speed and cost. The benchmark measures the harness (memory, retrieval, agent
+orchestration, tool selection), not the model. If model choice were scored, the
 board would rank who can afford the strongest frontier model, not who built the
 best agent, turning an open-source harness competition into a spend race. One
 frozen open-weight model holds that variable constant, so score gaps reflect
@@ -211,7 +211,7 @@ practice tracks scoring.
 
 Latency. Reported as `median_ms` on the leaderboard, never scored. It measures
 hardware and model-provider speed, not harness quality, and it varies with
-sandbox load, so two validators would compute different numbers — and the weight
+sandbox load, so two validators would compute different numbers, and the weight
 fold requires every validator to derive the same score from the same public
 ledger. Speed is bounded instead of ranked: a case that misses its per-case
 timeout scores 0, and the tool-efficiency factor penalizes over-calling, so the
@@ -307,12 +307,12 @@ then scores it. A submission is only valid if it keeps this contract intact:
 
 ### What you're free to change
 
-Everything else is yours: `baseline.rs` (system prompt, retrieval knobs, and
-tools — the scored levers in *How to optimize* above — plus the model, which only
-affects local practice), any other `src/` file, added crate dependencies, your
-own `fixtures/models/` weights, even the `Dockerfile` build steps. Restructure
-the crate however you like, as long as `docker build .` still produces a
-container serving that protocol on :8080.
+Everything else is yours: `baseline.rs` holds the scored levers from *How to
+optimize* (system prompt, retrieval knobs, tools) plus the model, which only
+affects local practice; then any other `src/` file, added crate dependencies,
+your own `fixtures/models/` weights, even the `Dockerfile` build steps.
+Restructure the crate however you like, as long as `docker build .` still
+produces a container serving that protocol on :8080.
 
 ## Mining on SN118
 

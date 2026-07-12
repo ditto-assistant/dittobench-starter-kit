@@ -183,7 +183,7 @@ of already-published per-case results (re-derivable from the run details):
 - Canary integrity (every run): a per-run seed-derived nonce is planted in the
   conversation and one memory case asks for it. An honest recall miss (the nonce
   is neither surfaced nor leaked) is a bounded `×0.85`; surfacing the planted
-  decoy nonce — a cross-user leak — is a hard `×0.5` disqualifier that easy recall
+  decoy nonce (a cross-user leak) is a hard `×0.5` disqualifier that easy recall
   elsewhere cannot buy back. A harness with a lexical nonce index passes and is
   unaffected. (The canary is also one graded memory case in `memory_mean`.)
 - Metamorphic consistency (runs with invariance families): bounded to
