@@ -428,6 +428,10 @@ fn print_report(report: &protocol::ScoreReport, ds: &protocol::Dataset) {
 
 // --- submit -----------------------------------------------------------------
 
+/// Submission tarball cap enforced by the platform (20 MiB). Checked locally so
+/// a miner learns here instead of being rejected server-side after upload.
+const MAX_TARBALL_BYTES: u64 = 20 * 1024 * 1024;
+
 fn submit() -> anyhow::Result<()> {
     let out = "dittobench-submission.tgz";
     // Never package secrets or local state: `.env` / `.env.*` hold your
@@ -442,6 +446,18 @@ fn submit() -> anyhow::Result<()> {
     }
     let status = cmd.args(["-czf", out, "."]).status().context("run tar")?;
     anyhow::ensure!(status.success(), "tar failed");
+
+    // Enforce the platform's 20 MiB cap locally so a miner fails fast here
+    // instead of being rejected server-side after upload.
+    let size = std::fs::metadata(out)
+        .with_context(|| format!("stat {out}"))?
+        .len();
+    anyhow::ensure!(
+        size <= MAX_TARBALL_BYTES,
+        "submission tarball {out} is {size} bytes, over the {MAX_TARBALL_BYTES}-byte (20 MiB) limit; \
+         trim large files (models, fixtures, checkouts) before submitting"
+    );
+
     println!("packaged repository -> {out}");
     println!("excluded (secrets + local state): {}", excludes.join(", "));
     println!();

@@ -393,7 +393,9 @@ impl Baseline {
                 user_id: USER_ID.to_string(),
                 query: query.to_string(),
                 limit: k,
-                candidate_pool_size: 50,
+                // Match the scored `run()` path (pool 100) so what a miner
+                // inspects via retrieve is what scoring actually sees.
+                candidate_pool_size: 100,
                 variant: Variant::V2,
                 ..CompositeSearchRequest::default()
             })
@@ -416,7 +418,7 @@ impl Baseline {
 
     /// Runs the full production retrieval pipeline for `query` and returns the
     /// retrieved memory pair ids, best-first. Exercises the whole stack —
-    /// MLP-predicted composite weights (V2, pool 50) + cross-encoder rerank —
+    /// MLP-predicted composite weights (V2, pool 100) + cross-encoder rerank —
     /// without an LLM call, so it isolates and measures retrieval quality.
     pub async fn retrieve(&self, query: &str, k: usize) -> anyhow::Result<Vec<String>> {
         let (memories, _meta) = self
@@ -425,7 +427,9 @@ impl Baseline {
                 user_id: USER_ID.to_string(),
                 query: query.to_string(),
                 limit: k,
-                candidate_pool_size: 50,
+                // Match the scored `run()` path (pool 100) so what a miner
+                // inspects via retrieve is what scoring actually sees.
+                candidate_pool_size: 100,
                 variant: Variant::V2,
                 ..CompositeSearchRequest::default()
             })

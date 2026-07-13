@@ -77,10 +77,13 @@ pub(super) async fn submit_start_handler(
         _ => "small".to_string(),
     };
     let url = format!("{}/v1/submit", state.submit.api_url.trim_end_matches('/'));
-    // BYOK: forward the miner's OpenRouter key (from env). It pays for model
-    // inference on the legacy no-lock crate path; generation is non-LLM and
-    // scoring is judge-free, so the validator otherwise runs no model. The key
-    // never touches the browser.
+    // BYOK: forward the miner's OpenRouter key (from env). It NEVER affects the
+    // score: scoring runs under the locked model (Qwen3-32B, forced by the
+    // validator), generation is non-LLM, and grading is judge-free. On the
+    // default `local` target the miner's own `serve` harness does its inference
+    // with its own env key, so this forwarded copy is unused there; it only
+    // funds inference on the legacy no-lock crate path. The key never touches
+    // the browser.
     let key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     let mut body = if req.target == "crate" {
         json!({
