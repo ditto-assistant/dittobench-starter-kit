@@ -27,6 +27,96 @@ real ranking models as weights:
 It also ships a self-contained seed user: a coherent slice of LongMemEval
 with subjects already synced.
 
+## How this fits together
+
+There are two repositories, and it helps to be exact about the split.
+
+- dittobench-starter-kit (this repo) is the crate you submit. You edit it, then
+  run `cargo run -- submit` to package the whole crate as a tarball. The
+  validator builds that tarball and scores it. This kit is not just a local test
+  rig; it is your submission.
+- ditto-harness is a dependency, not a copy inside this repo. It is Ditto's
+  production memory and agent engine, pinned to one commit in `Cargo.toml`. Cargo
+  downloads it when you build. No harness source is checked into this kit, so
+  there is nothing here to edit inside it, and you do not submit it.
+
+The dividing line is simple: ditto-harness knows nothing about DittoBench, the
+validator, or scoring. It is a generic memory and agent library, the same one
+Ditto runs in production. Every benchmark-aware line is in this kit.
+
+- The engine (ditto-harness): how memories are stored, retrieved, ranked, and
+  reasoned over. The memory store and vector database, the retrieval and ranking
+  pipeline, the agent loop, and the model and embedder clients. It exposes its
+  pieces as slots: it takes an embedder, a ranking-weight predictor, and a
+  reranker, and does not care where they come from.
+- The kit (this repo): everything benchmark-specific, plus your work. It fills
+  those slots with concrete pieces and your weights (`src/baseline.rs`), speaks
+  the validator protocol (`/health`, `/seed`, `/run`), ships the tool catalog and
+  the seed user, runs the local practice loop, and is what you customize and
+  submit.
+
+So the loop is: edit this kit, submit this kit. You tune the engine by what you
+hand it from the kit (your prompt, your reranker, your weights, your retrieval
+config), including the retrieval algorithm itself, the biggest lever on your
+score. You rarely edit ditto-harness directly; see Changing the retrieval
+algorithm for how far the kit reaches and the one case that needs a fork.
+
+`src/baseline.rs` is the one file most changes start from. It wires the pieces
+together (database, embedder, model, retrieval, tools) and is marked with
+`EXTENSION POINT` comments where you plug in your work.
+
+## What you optimize
+
+This is what miners optimize, and it is the only thing that moves your score. You
+make the harness remember and act better, all from `src/baseline.rs`:
+
+1. Memory retrieval: from a user's history, find the exact past facts that answer
+   a question. This is the harder half of the score and the biggest lever.
+2. Tool use: pick the right tool for a request, and no tool when none fits.
+3. Orchestration: the prompt and control flow that turn a question into a correct
+   answer.
+
+See How to optimize for the exact knobs, Per-question-type levers for the
+mechanism behind each scored question type, and Changing the retrieval algorithm
+for how far the retrieval lever reaches.
+
+Two things are held constant on purpose and never move your score: the model (the
+validator serves one frozen model and ignores yours) and latency (measured, not
+scored). See What isn't scored, and why. You do not compete on model choice or
+hardware.
+
+Why this is the competition: Ditto's product is memory, an assistant that recalls
+what you told it across sessions. DittoBench scores that exact capability on
+Ditto's real production retrieval stack, not a stand-in, so a harness that scores
+higher is a genuinely better memory system, and the strongest work can flow back
+into the product. The composite score is half tool accuracy, half memory recall.
+
+## Your workflow
+
+The loop is: edit this kit, test locally, submit this kit. In order:
+
+1. Edit `src/baseline.rs`: change the prompt, the retrieval config, the reranker,
+   the ranking weights, or the tools (the levers above).
+2. Test retrieval, fast and offline: `cargo run -- mem-eval --k 10` reports
+   recall@k with no LLM (needs only Ollama for embeddings). Run this after any
+   change to retrieval, weights, or the reranker.
+3. Test the full agent: `cargo run -- evaluate` (fixed inputs, best for
+   iterating) or `cargo run -- practice` (rotating inputs). Watch the composite,
+   the per-category tool means, and the slowest cases. Run this after any change
+   to the prompt or tools.
+4. Rehearse against the real validator (optional, recommended before you submit):
+   serve your harness and drive it from the playground Submit tab. This is the
+   only local run with a fresh random dataset per submission, and the only one
+   that exercises Tier B/C seeding. See Hosted BYOK practice.
+5. Package: `cargo run -- submit` builds `dittobench-submission.tgz` from your
+   whole crate.
+6. Go on-chain: register a hotkey on netuid 118 and upload with the eval fee. The
+   validator builds your crate in Docker and scores it under the model lock. See
+   Mining on SN118.
+
+You never leave this repo for any of it. ditto-harness is fetched automatically
+when you build.
+
 ## Contents
 
 
@@ -174,9 +264,9 @@ the highest-value change you can make.
 
 ## How to optimize
 
-Everything you tune lives in `src/baseline.rs`, marked `EXTENSION POINT`.
-Scoring locks the chat model (see *What isn't scored, and why* below), so
-the levers that move your scored composite are retrieval, the prompt, and tools:
+The three levers from What you optimize, in detail. Everything here lives in
+`src/baseline.rs`, marked `EXTENSION POINT`. The chat model is locked (see What
+isn't scored, and why), so the levers are retrieval, the prompt, and tools:
 
 1. Retrieval / memory: the production stack is wired and active, including the
   weight-predictor MLP, composite V2, and the cross-encoder reranker
@@ -265,7 +355,34 @@ drop it in. To run the exact production stack, use Vertex `text-embedding-005`
 
 - the production `model.bin`.
 
+## Changing the retrieval algorithm
 
+Retrieval is the biggest lever on your score, so this is worth being clear about:
+you can change the ranking algorithm itself, and for the most part you do it from
+this kit, not by editing ditto-harness. The harness exposes the pipeline as
+seams that `baseline.rs` already wires up:
+
+- Reranker: it is a trait. `baseline.rs` builds an `Arc<dyn Reranker>` and injects
+  it. Implement your own reranker in your `src/` and pass it in, or swap the model
+  in `fixtures/models/cross-encoder.onnx`.
+- Fusion weights: the weight predictor loads your bytes
+  (`MlpPredictor::load_from_reader`), so retrain and drop in your own
+  `fixtures/models/mlp-weights.bin`.
+- Raw retrieval: `store.db()` exposes the database directly (candidate search,
+  subjects, raw rows). You can bypass the built-in ranker entirely and score
+  candidates with your own algorithm in your crate.
+- Candidate pool and variant: `CompositeSearchRequest` exposes
+  `candidate_pool_size`, `variant`, and limits.
+- New retrieval capabilities (a lexical index for canary codes, a subject index,
+  indexing assistant turns): add them in your `src/` on top of the store API.
+
+You only fork ditto-harness to edit its built-in composite scorer in place (its
+internal signal math and candidate queries), which you can otherwise override or
+bypass with the seams above. To fork: point the `ditto-harness` `git` URL and
+`rev` in `Cargo.toml` at your fork. Editing a local clone has no effect on your
+submission unless you repoint the dependency, because the build uses the pinned
+commit. Your fork must be publicly fetchable for the validator to build it; a
+private fork needs the `gh_token` path shown in the `Dockerfile`.
 
 ## Submit
 
