@@ -162,6 +162,8 @@ calls, token usage, latency). Before memory questions it installs a haystack via
 
 Every submission gets a fresh procedural persona universe, and the composite
 is `0.5 × tool + 0.5 × memory`. The full grading rubric lives in `[PROTOCOL.md](PROTOCOL.md)`.
+`[BASELINES.md](BASELINES.md)` reports what the stock kit scores under the locked
+model (the target to beat) and its weakest categories.
 
 Memory is seeded in three tiers (see `[PROTOCOL.md](PROTOCOL.md)` `POST /seed`):
 A prepared subjects, B raw pairs only (build your own subject index),
