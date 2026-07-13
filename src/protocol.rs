@@ -99,16 +99,16 @@ pub struct RunRequest {
     pub user_input: String,
     #[serde(default)]
     pub tools: Vec<ToolDefWire>,
-    /// Optional (Phase C, `bench_version` 2): a validator-served mock
+    /// Optional (observed execution, `bench_version` 2): a validator-served mock
     /// tool-execution URL. When present, a harness should EXECUTE each non-memory
     /// catalog tool call by POSTing a [`ToolExecRequest`] here and using the
     /// returned [`ToolExecResponse::result`], instead of stubbing it locally. The
     /// validator then observes the real trajectory (rather than trusting
     /// self-report) and can score whether the answer incorporates returned
-    /// content. Absent ⇒ pre-Phase-C behavior (stub tools locally).
+    /// content. Absent ⇒ pre-observed-execution behavior (stub tools locally).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_endpoint: Option<String>,
-    /// Optional (Phase C): the memory graph this case must be answered from
+    /// Optional (observed execution): the memory graph this case must be answered from
     /// (multi-graph isolation). Mirrors the `user_id` the haystack was seeded
     /// under; answer only from this user's memory, never leak another user's
     /// facts. Absent ⇒ the default single-user graph.
@@ -119,7 +119,7 @@ pub struct RunRequest {
 /// One mock tool-execution call a harness POSTs to the validator-served
 /// [`RunRequest::tool_endpoint`] (Go: `ToolExecRequest`). The validator returns a
 /// deterministic, seed-derived [`ToolExecResponse`] and records the call as the
-/// authoritative observed trajectory (Phase C observed execution).
+/// authoritative observed trajectory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ToolExecRequest {
@@ -188,7 +188,7 @@ pub struct CaseScore {
     pub category: String,
     /// 0..1.
     pub tool_score: f64,
-    /// 0..1 result-usage credit for a result-usage tool case (Phase C): whether
+    /// 0..1 result-usage credit for a result-usage tool case (observed execution): whether
     /// the answer incorporated the value the executed tool returned. Omitted (0)
     /// for non-result-usage cases.
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -244,7 +244,7 @@ mod tests {
         for key in ["case_id", "system_prompt", "user_input", "tools"] {
             assert!(obj.contains_key(key), "missing key {key}");
         }
-        // The optional Phase C fields are omitted when absent (byte-compatible
+        // The optional observed-execution fields are omitted when absent (byte-compatible
         // with an old validator that never sends them).
         assert!(!obj.contains_key("tool_endpoint"));
         assert!(!obj.contains_key("user_id"));
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn phase_c_run_request_accepts_optional_fields() {
-        // A Phase C RunRequest from the validator deserializes cleanly.
+        // An observed-execution RunRequest from the validator deserializes cleanly.
         let json = r#"{
             "case_id": "web_result_usage-1-0",
             "system_prompt": "be helpful",

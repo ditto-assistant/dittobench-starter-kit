@@ -9,9 +9,9 @@ wire contract. The Rust definitions live in [`src/protocol.rs`](src/protocol.rs)
 Returns `200 {"status":"ok"}`.
 
 ### `POST /run`
-The validator POSTs one case at a time. Two optional Phase C fields
-(`tool_endpoint`, `user_id`) may be present; see
-[Phase C](#phase-c-observed-tool-execution-additive-optional) below.
+The validator POSTs one case at a time. Two optional fields
+(`tool_endpoint`, `user_id`) may be present for observed tool execution; see
+[Observed tool execution](#observed-tool-execution-additive-optional) below.
 
 Request body, `RunRequest`:
 ```json
@@ -81,7 +81,7 @@ DittoBench v2 seeding tiers (the memory side of the benchmark):
   `wave`, interleaved with `/run`. Seeding is an idempotent upsert: accept
   each wave and merge. Questions may target facts from any wave already seeded.
 
-## Phase C: observed tool execution (additive-optional)
+## Observed tool execution (additive-optional)
 
 `RunRequest` may carry two optional fields. They are additive: an older
 validator never sends them, and both shapes serialize identically without them.
@@ -128,7 +128,7 @@ calls on served categories are capped at 0.5.
 ## Score shapes
 
 - `CaseScore { case_id, category, tool_score, result_usage, latency_ms, called[], expected[], notes[] }`
-  (`result_usage` is emitted only on Phase C result-usage cases; omitted when 0)
+  (`result_usage` is emitted only on observed-execution result-usage cases; omitted when 0)
 - `ScoreReport { run_id, generated_at, composite, tool_mean, memory_mean, median_ms, n, per_case[] }`
 
 ### Scoring rules (local scorer; on-chain v2 differences below)
@@ -178,7 +178,7 @@ by up to three bounded integrity factors. Each is `1.0` (no effect) when its
 trigger is absent, so accuracy stays dominant and every factor is a pure function
 of already-published per-case results (re-derivable from the run details):
 
-- Tool efficiency (observed / Phase C runs): bounded to `[0.85, 1.0]`. The first
+- Tool efficiency (observed-execution runs): bounded to `[0.85, 1.0]`. The first
   extra tool call is free, then the over-call penalty saturates.
 - Canary integrity (every run): a per-run seed-derived nonce is planted in the
   conversation and one memory case asks for it. An honest recall miss (the nonce

@@ -53,7 +53,7 @@ use serde_json::{json, Value};
 use crate::protocol;
 
 /// Shared per-case context for executing catalog tools through the validator's
-/// mock tool endpoint (Phase C observed execution). One is built per `/run` when
+/// mock tool endpoint (observed execution). One is built per `/run` when
 /// the validator advertises `tool_endpoint`, and Arc-cloned into every
 /// [`WireTool`] of that case so they share one HTTP client and a monotonic `hop`
 /// counter (the trajectory order the validator observes).
@@ -67,7 +67,7 @@ struct ToolExecCtx {
 
 /// A catalog tool built from a wire tool definition. It exposes the case's
 /// catalog tool to the model — so the agent can *select* it, which is what the
-/// validator scores. When a [`ToolExecCtx`] is attached (Phase C), `execute()`
+/// validator scores. When a [`ToolExecCtx`] is attached (observed execution), `execute()`
 /// runs the tool for real by POSTing to the validator's mock endpoint and
 /// returning the served result, so (a) the validator observes the true
 /// trajectory and (b) the model can incorporate the returned content
@@ -98,7 +98,7 @@ impl Tool for WireTool {
     }
 
     async fn execute(&self, args: Value) -> HarnessResult<Value> {
-        // Phase C: execute for real through the validator's mock endpoint.
+        // Observed execution: execute for real through the validator's mock endpoint.
         if let Some(ctx) = &self.exec {
             let hop = ctx.hop.fetch_add(1, Ordering::SeqCst);
             let body = protocol::ToolExecRequest {
@@ -146,7 +146,7 @@ impl Tool for WireTool {
         }
         Ok(json!({
             "status": "ok",
-            "note": "stub result from the practice harness; provide tool_endpoint (Phase C) or a real Tool to execute",
+            "note": "stub result from the practice harness; provide tool_endpoint (observed execution) or a real Tool to execute",
         }))
     }
 }
@@ -242,7 +242,7 @@ pub struct Baseline {
     model_name: String,
     store: Arc<Store>,
     include_memory_tools: bool,
-    /// Shared outbound HTTP client (Phase C tool-endpoint calls). One client
+    /// Shared outbound HTTP client (observed-execution tool-endpoint calls). One client
     /// per Baseline so connections are pooled across cases.
     http: reqwest::Client,
 }
@@ -462,7 +462,7 @@ impl Baseline {
     pub async fn run(&self, req: protocol::RunRequest) -> anyhow::Result<protocol::RunResponse> {
         let started = Instant::now();
 
-        // Phase C: the case may be scoped to a specific memory graph (multi-graph
+        // Observed execution: the case may be scoped to a specific memory graph (multi-graph
         // isolation) — answer from that user's memory, defaulting to the kit user.
         let user_id = req
             .user_id
@@ -470,7 +470,7 @@ impl Baseline {
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| USER_ID.to_string());
 
-        // Phase C: when the validator advertises a mock tool endpoint, execute
+        // Observed execution: when the validator advertises a mock tool endpoint, execute
         // catalog tools through it (so the validator observes the trajectory and
         // the model can use returned content). One shared context per case.
         let exec_ctx = req.tool_endpoint.as_ref().map(|ep| {
