@@ -57,7 +57,7 @@ pub struct MemoryCase {
     pub query: String,
     /// Expected answer — LongMemEval stores some as numbers, so keep it as a
     /// raw JSON value; use [`MemoryCase::answer_text`] for the plain-text
-    /// answer handed to the LLM QA judge.
+    /// answer used by the deterministic grader.
     #[serde(default)]
     pub answer: serde_json::Value,
     #[serde(default)]

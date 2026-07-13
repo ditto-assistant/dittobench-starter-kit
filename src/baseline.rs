@@ -11,15 +11,11 @@
 //! the `RunResult` back to a `protocol::RunResponse`.
 //!
 //! ============================ EXTENSION POINTS ============================
-//! Miners improve their score by editing THIS file. The high-leverage knobs:
-//!
-//!  * MODEL CHOICE — `Baseline::build_model`. Swap the OpenRouter model id,
-//!    point at a local Ollama model (free, private), or a vLLM endpoint. A
-//!    smarter/faster model directly moves tool-accuracy and latency.
-//!
-//!  * SYSTEM PROMPT — `PrepareRequest::system_prompt` in `run()`. The wire
-//!    request supplies one, but you can prepend/augment it (tool-use policy,
-//!    abstention rules, formatting) to nudge correct tool selection.
+//! Miners improve their score by editing THIS file. On-chain scoring locks the
+//! model to `qwen/qwen3-32b` (Chutes `Qwen/Qwen3-32B-TEE`, served through a
+//! model-relay) and FORCES it, so the model is not a tuning lever on-chain. The
+//! real levers are retrieval quality, memory grounding, and tool-selection /
+//! argument accuracy:
 //!
 //!  * RETRIEVAL / MEMORY — `PrepareRequest` fields `use_composite`,
 //!    `long_term_limit`, `short_term_limit`, `candidate_pool_size`, `variant`.
@@ -31,6 +27,16 @@
 //!    the agent real capabilities (web search, image gen, ...). Note: the
 //!    validator scores tool *selection*, so even stub tools that record intent
 //!    are fine for tool-calling cases.
+//!
+//!  * SYSTEM PROMPT — `PrepareRequest::system_prompt` in `run()`. The wire
+//!    request supplies one, but you can prepend/augment it (tool-use policy,
+//!    abstention rules, formatting) to nudge correct tool selection.
+//!
+//!  * MODEL CHOICE — `Baseline::build_model`. Only affects LOCAL practice: swap
+//!    the model id, point at a local Ollama model (free, private), or a vLLM
+//!    endpoint. On-chain the validator overrides this with the locked
+//!    `qwen/qwen3-32b`, so it is not a scored lever; use it to rehearse against
+//!    the reference weights locally.
 //! =========================================================================
 
 use std::sync::atomic::{AtomicI32, Ordering};

@@ -1,14 +1,14 @@
 //! Turns harness `RunResponse`s into a DittoBench `ScoreReport`.
 //!
 //! Mirrors the production DittoBench scorer that produced the published
-//! numbers:
+//! numbers. Scoring is judge-free and deterministic; there is no LLM judge.
 //!
-//! Tool composite (0–1) = **0.5 × tool-accuracy + 0.5 × response-quality judge**:
+//! Tool case score (0–1) = deterministic tool-accuracy:
 //!   - tool-accuracy = `matched / total_expected`, −0.1 per extra/unexpected call
 //!     (skipped if `allow_extra_tools`), clamped 0–1; no-expected-tool cases score
-//!     1.0 for this half (Go: `computeToolAccuracy`, /50). This is the
-//!     deterministic [`score_tool_case`] below — and that accuracy IS the
-//!     case score (judge-free, matching the validator's FinishTool).
+//!     1.0 (Go: `computeToolAccuracy`, /50). This is the deterministic
+//!     [`score_tool_case`] below, and that accuracy IS the case score (matching
+//!     the validator's FinishTool).
 //!
 //! Memory accuracy = the deterministic boolean in `mem_results`, produced by
 //! [`crate::grade::memory_correct`] (normalized bounded containment with an
@@ -63,7 +63,7 @@ pub fn score(
             notes.push("no response from harness (error or timeout)".to_string());
         } else if !correct {
             notes.push(format!(
-                "judge marked incorrect; expected {:?}",
+                "graded incorrect (deterministic containment); expected {:?}",
                 mc.expected_answer
             ));
         }
@@ -110,16 +110,6 @@ pub fn score(
         n: (n_tool + n_mem) as i32,
         per_case,
     }
-}
-
-/// Case-insensitive substring check. Test-only convenience — real memory
-/// scoring uses the LLM QA judge (see [`crate::judge`]), never substring
-/// matching, because short/numeric answers over-match as substrings.
-pub fn answer_matches(final_text: &str, expected: &str) -> bool {
-    if expected.trim().is_empty() {
-        return false;
-    }
-    final_text.to_lowercase().contains(&expected.to_lowercase())
 }
 
 /// Scores a single tool case against a harness response (exposed for live,
@@ -365,12 +355,5 @@ mod tests {
             "composite = {}",
             r.composite
         );
-    }
-
-    #[test]
-    fn answer_matching_is_case_insensitive_substring() {
-        assert!(answer_matches("Your dog is named Biscuit.", "biscuit"));
-        assert!(!answer_matches("no idea", "Biscuit"));
-        assert!(!answer_matches("anything", "  "));
     }
 }

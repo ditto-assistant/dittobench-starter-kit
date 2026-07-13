@@ -309,7 +309,7 @@ struct MemoryFact {
     /// Short label for the fact (used in generated case ids / debugging).
     topic: &'static str,
     question: &'static str,
-    /// The expected answer the response must surface (judged by the LLM QA judge).
+    /// The expected answer the response must surface (graded deterministically, judge-free).
     answer: &'static str,
     prompt: &'static str,
     response: &'static str,

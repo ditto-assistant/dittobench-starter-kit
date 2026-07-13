@@ -5,7 +5,7 @@
 //! - [`catalog`]: the Ditto tool catalog.
 //! - [`datagen`]: deterministic-per-seed dataset generation.
 //! - [`eval`]: the shared tool+memory evaluation loop (CLI + playground).
-//! - [`judge`]: LLM-judge scoring (tool-response and memory QA judges).
+//! - [`grade`]: deterministic judge-free memory grading (no LLM).
 //! - [`scorer`]: turns harness responses into a score report.
 //! - [`baseline`]: the optimizable agent (this is what you tune).
 //! - [`reranker`]: ONNX cross-encoder reranker (production retrieval stage).

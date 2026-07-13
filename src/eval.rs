@@ -28,8 +28,8 @@ pub struct CaseOutcome<'a> {
     pub case_id: &'a str,
     pub category: &'a str,
     pub prompt: &'a str,
-    /// Blended case score: `0.5 × tool-accuracy + 0.5 × response-quality` for
-    /// tool cases; the 0/1 judge verdict for memory cases; 0.0 on harness error.
+    /// Case score: deterministic tool-accuracy for tool cases; the 0/1
+    /// deterministic grade for memory cases; 0.0 on harness error.
     pub score: f64,
     pub latency_ms: i64,
     /// Human-readable per-case detail (the error text when `error` is set).

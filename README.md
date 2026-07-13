@@ -9,7 +9,7 @@ its per-case timeout scores 0.
 The kit is a working baseline plus the full local eval loop (tool calling +
 memory + speed) running locally against an embedded Turso (SQLite-family)
 database with native vector search inside the
-`[ditto-harness](https://github.com/ditto-assistant/ditto-harness)` crate.
+[ditto-harness](https://github.com/ditto-assistant/ditto-harness) crate.
 
 It mirrors Ditto's production memory retrieval pipeline and ships the
 real ranking models as weights:
@@ -139,7 +139,7 @@ when you build.
 
 ## Quickstart
 
-> `[SETUP.md](SETUP.md)` is the step-by-step guide for
+> [SETUP.md](SETUP.md) is the step-by-step guide for
 > setting up this kit with `ditto-harness` (the crate dependency), including
 > Ollama and `.env`.
 
@@ -219,7 +219,7 @@ The hosted validator is available. The playground's Submit tab drives it:
 1. Serve your harness and expose it publicly so the validator can reach it:
   `cargo run -- serve --port 8080`, then e.g. `ngrok http 8080`.
 2. Set `DITTOBENCH_HARNESS_URL` in `.env` to the public URL.
-  `[.env.example](.env.example)` ships the official `DITTOBENCH_API_URL`.
+  [.env.example](.env.example) ships the official `DITTOBENCH_API_URL`.
 3. `cargo run -- playground` → open the Submit tab and pick a run size.
   Your harness calls the locked model (Qwen3-32B, the kit default) and your
   `OPENROUTER_API_KEY` pays for that inference; BYOK means your key, not your
@@ -246,16 +246,16 @@ to the model + Ollama at runtime.
 The validator calls `POST /run` with a `RunRequest` (system prompt, user
 input, available tools) and expects a `RunResponse` (final text, observed tool
 calls, token usage, latency). Before memory questions it installs a haystack via
-`POST /seed`. Full shapes in `[PROTOCOL.md](PROTOCOL.md)`.
+`POST /seed`. Full shapes in [PROTOCOL.md](PROTOCOL.md).
 
 ### DittoBench v2 scoring
 
 Every submission gets a fresh procedural persona universe, and the composite
-is `0.5 × tool + 0.5 × memory`. The full grading rubric lives in `[PROTOCOL.md](PROTOCOL.md)`.
-`[BASELINES.md](BASELINES.md)` reports what the stock kit scores under the locked
+is `0.5 × tool + 0.5 × memory`. The full grading rubric lives in [PROTOCOL.md](PROTOCOL.md).
+[BASELINES.md](BASELINES.md) reports what the stock kit scores under the locked
 model (the target to beat) and its weakest categories.
 
-Memory is seeded in three tiers (see `[PROTOCOL.md](PROTOCOL.md)` `POST /seed`):
+Memory is seeded in three tiers (see [PROTOCOL.md](PROTOCOL.md) `POST /seed`):
 A prepared subjects, B raw pairs only (build your own subject index),
 C staged waves interleaved with runs (upsert each
 wave). The bundled harness reuses the production `save_memory` path in
@@ -349,7 +349,7 @@ scores raw text), so it is identical to production.
 
 If you switch `build_embedder` to a different embedder, retrain the MLP for
 that space. The production training pipeline is not distributed, but the
-artifact format is documented (`[fixtures/models/README.md](fixtures/models/README.md)`
+artifact format is documented ([fixtures/models/README.md](fixtures/models/README.md)
 and the harness's `mlp.rs`), so you can train your own with any pipeline and
 drop it in. To run the exact production stack, use Vertex `text-embedding-005`
 
@@ -404,6 +404,9 @@ the entire buildable project, with the `Dockerfile` at the tarball root:
 - `src/`, including your edited `baseline.rs` and the `dittobench-miner` server
 - `fixtures/`, the ONNX models + seed data your harness loads at runtime
 
+The tarball is capped at 20 MiB. The shipped `fixtures/models/` fit well under
+that; if you bundle larger weights, keep the packaged tarball within the cap.
+
 You are not submitting `src/baseline.rs` on its own, and you are not
 submitting `ditto-harness`. `ditto-harness` is a pinned public git dependency
 of your crate. The Docker build fetches it.
@@ -418,7 +421,7 @@ then scores it. A submission is only valid if it keeps this contract intact:
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | A `Dockerfile` at the tarball root                                     | It's the validator's Docker build context.                                       |
 | `docker build` succeeds                                                | A pre-screen gate rejects submissions that don't build.                          |
-| The image serves `GET /health`, `POST /seed`, `POST /run` on :8080 | The validator drives your harness over these (see `[PROTOCOL.md](PROTOCOL.md)`). |
+| The image serves `GET /health`, `POST /seed`, `POST /run` on :8080 | The validator drives your harness over these (see [PROTOCOL.md](PROTOCOL.md)). |
 | `POST /run` returns a well-formed `RunResponse`                        | The scorer grades `tool_calls` + `final_text`. A malformed body scores 0.        |
 
 
@@ -435,10 +438,10 @@ produces a container serving that protocol on :8080.
 
 ## Mining on SN118
 
-> Status: the hosted practice validator is available today. The on-chain
-> submission path (`ditto upload`, eval fee, scoring, weights) and the
-> leaderboard are not yet live; both run on `bench_version` 2, and this section
-> documents that contract.
+> Status: the hosted practice validator and the [SN118 leaderboard](https://platform-api.heyditto.ai/)
+> are live today. The on-chain submission path (`ditto upload`, eval fee, scoring,
+> weights) is not yet live, so no competitive scores populate the leaderboard yet.
+> It runs on `bench_version` 2, and this section documents that contract.
 
 1. Registration. You need a hotkey registered on subnet netuid 118
 (`btcli subnet register --netuid 118`) and TAO for the registration cost plus
@@ -467,7 +470,7 @@ env. `Baseline::from_env` already does this, so keep that property if you rewrit
 
 4. Timeouts. 10 s for `/health` to come up, 60 s per `/run` call (a case
 that misses it scores 0), 5 minutes per `/seed` wave. The table is in
-`[PROTOCOL.md](PROTOCOL.md)`.
+[PROTOCOL.md](PROTOCOL.md).
 
 5. Run shape. An on-chain run is `run_size=full`: on the order of 50
 memory cases + 60 tool cases, with 2 staged seeding waves, a substantial
@@ -504,7 +507,7 @@ per-case grading, the composite carries bounded integrity multipliers: a per-run
 canary nonce (bounded penalty for an honest miss, hard cap for leaking the
 decoy), a metamorphic-consistency factor over invariance families, and the
 tool-efficiency factor. All three are detailed in
-`[PROTOCOL.md](PROTOCOL.md)` and are pure functions of the published run details.
+[PROTOCOL.md](PROTOCOL.md) and are pure functions of the published run details.
 
 10. Originality (duplicate detection). Before scoring, the platform compares
 your uploaded crate against every other miner's eligible submission across
@@ -536,20 +539,20 @@ sufficient. No GPU is required unless you bundle a local LLM.
 
 - Do not overfit the local scorer. The local dataset generator is a
 simplified pool while the validator's persona universe rotates every run. See
-the blockquote in `[PROTOCOL.md](PROTOCOL.md)`.
+the blockquote in [PROTOCOL.md](PROTOCOL.md).
 - Arguments weigh as much as selection on-chain. The on-chain
 deterministic tool grade is `0.4 name F1 + 0.4 argument F1 + 0.2 trajectory`
-(see `[PROTOCOL.md](PROTOCOL.md)`). Only the *local* scorer is name-centric.
+(see [PROTOCOL.md](PROTOCOL.md)). Only the *local* scorer is name-centric.
 - Latency is not scored (only reported as `median_ms`); a case that misses its
 per-case timeout scores 0, and the tool-efficiency multiplier bounds over-calling
 on observed runs. The rationale is in *What isn't scored, and why*. Measure with
 `practice`.
 - Memory needs the seed user loaded + Ollama embeddings. Run `seed-user`
 first. If `mem-eval` reports `recall@k: 0.000`, see
-`[SETUP.md](SETUP.md)` → *Troubleshooting*.
+[SETUP.md](SETUP.md) → *Troubleshooting*.
 
 
 
 ## License
 
-MIT (`[LICENSE](LICENSE)`). The `ditto-harness` dependency is also MIT-licensed.
+MIT ([LICENSE](LICENSE)). The `ditto-harness` dependency is also MIT-licensed.

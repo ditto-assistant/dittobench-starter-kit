@@ -150,17 +150,17 @@
         <div id="sc-legend" class="hide">
           <h3>How to read this</h3>
           <ul class="legend">
-            <li><b>Composite</b> = 0.6 × tool score + 0.4 × memory score (the headline number).</li>
-            <li><b>Tool score</b> (per case): <b>½ tool-accuracy + ½ response-quality judge</b> — tool-accuracy = matched ÷ expected tools (−0.1/extra; no-tool case = 1.0 if nothing called); the LLM judge rates the reply's helpfulness + accuracy. Mirrors the backend's DittoBench tool composite.</li>
-            <li><b>Memory score</b> (per question): an <b>LLM judge</b> (yes/no), the same LongMemEval QA judge the published scores used — not a substring match.</li>
+            <li><b>Composite</b> = 0.5 × tool score + 0.5 × memory score (the headline number).</li>
+            <li><b>Tool score</b> (per case): <b>deterministic tool-accuracy</b> = matched ÷ expected tools (−0.1/extra; no-tool case = 1.0 if nothing called). Judge-free. Mirrors the backend's DittoBench tool score.</li>
+            <li><b>Memory score</b> (per question): a <b>deterministic yes/no grade</b> (normalized containment per answer kind), the same grader the published scores used; no LLM judge.</li>
             <li><b>Score colors:</b> <span class="dot good"></span> 1.0 · <span class="dot ok"></span> partial · <span class="dot bad"></span> 0.</li>
             <li>Inputs are fixed, but the model is stochastic — expect small run-to-run variation.</li>
           </ul>
         </div>
       </div>
       <div id="view-submit" class="hide">
-        <div class="internal-banner">🔑 <b>BYOK practice.</b> This submits to the <b>official hosted validator</b> for off-chain practice. Your <code>OPENROUTER_API_KEY</code> (from <code>.env</code>) is forwarded per request for the generator + judge — the validator stores no keys. The validator must be able to reach your harness, so expose it (e.g. <code>ngrok http 8080</code>) and set <code>DITTOBENCH_HARNESS_URL</code>. <i>Pointing <code>DITTOBENCH_API_URL</code> at a localhost api is internal-dev only.</i></div>
-        <div class="score-intro">Submit to the <b>hosted validator</b> (dittobench-api). It generates a <b>fresh anti-cheat dataset</b> (paraphrased tool cases + a freshly assembled LongMemEval haystack), seeds the haystack into your harness, runs every tool + memory case, and scores them with an LLM judge. Watch the stages stream in realtime below.</div>
+        <div class="internal-banner">🔑 <b>BYOK practice.</b> This submits to the <b>official hosted validator</b> for off-chain practice. Your <code>OPENROUTER_API_KEY</code> (from <code>.env</code>) is forwarded per request to pay for your harness's model inference — the validator stores no keys. The validator must be able to reach your harness, so expose it (e.g. <code>ngrok http 8080</code>) and set <code>DITTOBENCH_HARNESS_URL</code>. <i>Pointing <code>DITTOBENCH_API_URL</code> at a localhost api is internal-dev only.</i></div>
+        <div class="score-intro">Submit to the <b>hosted validator</b> (dittobench-api). It generates a <b>fresh anti-cheat dataset</b> (paraphrased tool cases + a freshly assembled LongMemEval haystack), seeds the haystack into your harness, runs every tool + memory case, and scores them deterministically (judge-free). Watch the stages stream in realtime below.</div>
         <div class="submit-controls">
           <label class="seg-label">size</label>
           <div class="seg" id="sub-size">
