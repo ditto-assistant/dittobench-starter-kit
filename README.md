@@ -11,7 +11,7 @@ memory + speed) running locally against an embedded Turso (SQLite-family)
 database with native vector search inside the
 `[ditto-harness](https://github.com/ditto-assistant/ditto-harness)` crate.
 
-It mirrors Ditto's production memory retrieval pipeline 1:1 and ships the
+It mirrors Ditto's production memory retrieval pipeline and ships the
 real ranking models as weights:
 
 1. Vector candidate pool over the seeded memories (cosine on 768-dim embeddings).
@@ -25,7 +25,7 @@ real ranking models as weights:
    and fuses with composite rank via Reciprocal Rank Fusion (k=60, ceWeight=0.7).
 
 It also ships a self-contained seed user: a coherent slice of LongMemEval
-with subjects already synced.
+(a public long-term-memory QA benchmark) with subjects already synced.
 
 ## How this fits together
 
@@ -33,14 +33,14 @@ There are two repositories, and it helps to be exact about the split.
 
 - dittobench-starter-kit (this repo) is the crate you submit. You edit it, then
   run `cargo run -- submit` to package the whole crate as a tarball. The
-  validator builds that tarball and scores it. This kit is not just a local test
-  rig; it is your submission.
+  validator builds that tarball and scores it. This kit is both the local test
+  rig and your submission.
 - ditto-harness is a dependency, not a copy inside this repo. It is Ditto's
   production memory and agent engine, pinned to one commit in `Cargo.toml`. Cargo
   downloads it when you build. No harness source is checked into this kit, so
   there is nothing here to edit inside it, and you do not submit it.
 
-The dividing line is simple: ditto-harness knows nothing about DittoBench, the
+The dividing line: ditto-harness knows nothing about DittoBench, the
 validator, or scoring. It is a generic memory and agent library, the same one
 Ditto runs in production. Every benchmark-aware line is in this kit.
 
@@ -57,8 +57,8 @@ Ditto runs in production. Every benchmark-aware line is in this kit.
 
 So the loop is: edit this kit, submit this kit. You tune the engine by what you
 hand it from the kit (your prompt, your reranker, your weights, your retrieval
-config), including the retrieval algorithm itself, the biggest lever on your
-score. You rarely edit ditto-harness directly; see Changing the retrieval
+config), including the retrieval algorithm itself, which moves your score most.
+You rarely edit ditto-harness directly; see Changing the retrieval
 algorithm for how far the kit reaches and the one case that needs a fork.
 
 `src/baseline.rs` is the one file most changes start from. It wires the pieces
@@ -71,7 +71,7 @@ This is what miners optimize, and it is the only thing that moves your score. Yo
 make the harness remember and act better, all from `src/baseline.rs`:
 
 1. Memory retrieval: from a user's history, find the exact past facts that answer
-   a question. This is the harder half of the score and the biggest lever.
+   a question. This is the harder half of the score.
 2. Tool use: pick the right tool for a request, and no tool when none fits.
 3. Orchestration: the prompt and control flow that turn a question into a correct
    answer.
@@ -88,7 +88,7 @@ hardware.
 Why this is the competition: Ditto's product is memory, an assistant that recalls
 what you told it across sessions. DittoBench scores that exact capability on
 Ditto's real production retrieval stack, not a stand-in, so a harness that scores
-higher is a genuinely better memory system, and the strongest work can flow back
+higher is a better memory system, and strong work can flow back
 into the product. The composite score is half tool accuracy, half memory recall.
 
 ## Your workflow
@@ -107,7 +107,7 @@ The loop is: edit this kit, test locally, submit this kit. In order:
 4. Rehearse against the real validator (optional, recommended before you submit):
    serve your harness and drive it from the playground Submit tab. This is the
    only local run with a fresh random dataset per submission, and the only one
-   that exercises Tier B/C seeding. See Hosted BYOK practice.
+   that exercises Tier B/C seeding. See Hosted BYOK (bring your own key) practice.
 5. Package: `cargo run -- submit` builds `dittobench-submission.tgz` from your
    whole crate.
 6. Go on-chain: register a hotkey on netuid 118 and upload with the eval fee. The
@@ -147,8 +147,8 @@ when you build.
 # 1. Pick a chat model for LOCAL practice. Default provider is OpenRouter,
 #    defaulting to qwen/qwen3-32b, the on-chain scored model (matches
 #    .env.example). On-chain scoring locks inference to Qwen3-32B served in a
-#    TEE (Chutes Qwen/Qwen3-32B-TEE) and overrides your model, so the default
-#    already matches scoring conditions.
+#    TEE (Trusted Execution Environment; Chutes Qwen/Qwen3-32B-TEE) and overrides
+#    your model, so the default already matches scoring conditions.
 export OPENROUTER_API_KEY=sk-or-...
 # (optional) export DITTOBENCH_MODEL=<any OpenRouter model id>
 
@@ -156,7 +156,7 @@ export OPENROUTER_API_KEY=sk-or-...
 #    DITTOBENCH_MODEL=Qwen/Qwen3-32B-TEE to practice on the exact scored backend):
 # export DITTOBENCH_PROVIDER=chutes
 # export CHUTES_API_KEY=cpk_...
-# export DITTOBENCH_MODEL=deepseek-ai/DeepSeek-V3.2-TEE
+# export DITTOBENCH_MODEL=Qwen/Qwen3-32B-TEE   # Chutes defaults to deepseek-ai/DeepSeek-V3.2-TEE; override to the scored model
 
 #    ...or run fully local with Ollama:
 # export DITTOBENCH_PROVIDER=ollama
@@ -181,7 +181,7 @@ cargo run -- serve --port 8080
 
 ## Playground (talk to the agent)
 
-The interactive playground is a chat UI wired to a 1:1 production-Ditto agent:
+The interactive playground is a chat UI wired to a production-Ditto agent:
 the v2 system prompt + persona + tool-use policy, the model set by
 `DITTOBENCH_MODEL` (`.env.example` ships `qwen/qwen3-32b`, the scored model; set
 `google/gemini-3.1-flash-lite` to mirror prod Ditto's model), the full tool
@@ -274,7 +274,7 @@ isn't scored, and why), so the levers are retrieval, the prompt, and tools:
    swapping the cross-encoder ONNX, adjusting the RRF `k`/`ceWeight` in
    `reranker.rs`, or changing `candidate_pool_size`/`variant`/limits. Measure
    with `mem-eval` (`recall@k`). Memory is the harder half of the composite and
-   retrieval recall is the main bottleneck, so this is the biggest scored lever.
+   retrieval recall is the main bottleneck, so this is the highest-value scored lever.
 2. System prompt: augment the per-case prompt with a tool-use policy and
   abstention rules so the agent picks the right tool (and *no* tool when it
    shouldn't).
@@ -330,7 +330,7 @@ being measured:
 | canary | a lexical/exact-match index. Embeddings represent random tokens (`VK-…` codes) poorly, so semantic-only retrieval misses them: a concrete, winnable gap the stock kit does not attempt |
 | injection-resistance | a system-prompt guard: the frozen harness model complies with embedded overrides unless YOUR harness defends; a scored, discriminative surface the stock kit does not attempt |
 | isolation | honor `user_id` scoping (already wired in the kit's store) |
-| abstention, DRM lure | confidence gating + the `abstain` wire flag. Decline when retrieval finds nothing (or finds only someone ELSE's value) instead of fabricating |
+| abstention, DRM lure (a related decoy that tempts a false recall) | confidence gating + the `abstain` wire flag. Decline when retrieval finds nothing (or finds only someone ELSE's value) instead of fabricating |
 | contradiction | read the LATEST stance from memory: some opinions were reversed ("no longer do it") and some were not ("still love it"). Both answers occur under the same question surface, so the signal must come from retrieval |
 
 The two rows that most separate a naive submission from a competitive one are
@@ -357,7 +357,7 @@ drop it in. To run the exact production stack, use Vertex `text-embedding-005`
 
 ## Changing the retrieval algorithm
 
-Retrieval is the biggest lever on your score, so this is worth being clear about:
+Retrieval is the main lever on your score, so this is worth being clear about:
 you can change the ranking algorithm itself, and for the most part you do it from
 this kit, not by editing ditto-harness. The harness exposes the pipeline as
 seams that `baseline.rs` already wires up:
@@ -435,10 +435,10 @@ produces a container serving that protocol on :8080.
 
 ## Mining on SN118
 
-> Status: the hosted practice validator is available. The on-chain
-> submission path (`ditto upload`, eval fee, scoring → weights) and the
-> production leaderboard are not yet deployed (final testing and validation in
-> progress). This section describes the contract they launch with.
+> Status: the hosted practice validator is available today. The on-chain
+> submission path (`ditto upload`, eval fee, scoring, weights) and the
+> leaderboard are not yet live; both run on `bench_version` 2, and this section
+> documents that contract.
 
 1. Registration. You need a hotkey registered on subnet netuid 118
 (`btcli subnet register --netuid 118`) and TAO for the registration cost plus
@@ -512,8 +512,8 @@ several dimensions: exact bytes, normalized source (comments, whitespace, and
 formatting stripped, so a reformat/recomment/file-rename does not hide a copy),
 lexical and AST-structural fingerprints, the prompt/strategy text, and a
 semantic code-embedding vector. A runtime behavioral signal (your observed
-tool-call trajectory on a shared dataset seed) is being brought online alongside
-these. An exact or trivially repackaged copy of another miner's agent is held
+tool-call trajectory on a shared dataset seed) is not folded into this comparison
+today. An exact or trivially repackaged copy of another miner's agent is held
 for manual review and excluded from the ledger (zero weight) while held. The
 earlier upload wins by first-seen. In the softer "similar but not identical"
 band a hold requires agreement across multiple independent signals, so
@@ -522,7 +522,7 @@ shared `ditto-harness` dependency is expected, and two miners independently
 arriving at similar prompts or structure is fine. Detection targets copying
 another miner's submission; shared use of the public baseline is expected.
 First-seen protects the original author over a later uploader. Forking a leaked
-crate and renaming its symbols does not earn. Differentiate for real: change
+crate and renaming its symbols does not earn. Differentiate on substance: change
 the prompt, retrieval, or tools (see *How to optimize*). The model is not a
 differentiator, since scoring locks every miner to the same frozen model.
 
