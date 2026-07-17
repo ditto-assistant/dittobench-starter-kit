@@ -469,6 +469,46 @@ impl Baseline {
     /// Tool calls are observed by scanning the assistant messages in the
     /// agent transcript (the harness records each tool call as an assistant
     /// message with `tool_calls`).
+    /// Answer the validator's reachability probe: POST one `search_web` call
+    /// through the advertised `tool_endpoint` and report it. Deterministic and
+    /// model-free — the probe verifies that the endpoint is reachable from
+    /// this harness's network namespace, nothing else, so routing it through
+    /// the model would only add a way to fail. Without an endpoint (a bare
+    /// practice runner) there is nothing to probe; answer normally so the turn
+    /// cannot wedge a run.
+    async fn preflight(
+        &self,
+        req: &protocol::RunRequest,
+        user_id: &str,
+        started: Instant,
+    ) -> protocol::RunResponse {
+        let mut tool_calls = Vec::new();
+        if let Some(endpoint) = req.tool_endpoint.as_ref().filter(|e| !e.is_empty()) {
+            let args = json!({ "query": "preflight" });
+            let body = protocol::ToolExecRequest {
+                case_id: req.case_id.clone(),
+                user_id: user_id.to_string(),
+                name: "search_web".to_string(),
+                args: args.clone(),
+                hop: 0,
+            };
+            match self.http.post(endpoint).json(&body).send().await {
+                Ok(_) => tool_calls.push(protocol::ObservedToolCall {
+                    name: "search_web".to_string(),
+                    args,
+                    hop: 0,
+                }),
+                Err(err) => eprintln!("preflight probe could not reach tool_endpoint: {err}"),
+            }
+        }
+        protocol::RunResponse {
+            final_text: "ok".to_string(),
+            tool_calls,
+            latency_ms: started.elapsed().as_millis() as i64,
+            ..Default::default()
+        }
+    }
+
     pub async fn run(&self, req: protocol::RunRequest) -> anyhow::Result<protocol::RunResponse> {
         let started = Instant::now();
 
@@ -479,6 +519,16 @@ impl Baseline {
             .clone()
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| USER_ID.to_string());
+
+        // Reachability preflight (bench_version 3, PROTOCOL.md): a case whose
+        // id carries the reserved `preflight:` prefix is the validator's probe
+        // turn. The protocol REQUIRES one call to a served tool through
+        // `tool_endpoint` before responding — mechanically, not via the model.
+        // A scored run whose probe is never observed FAILS (and is retried),
+        // so do not remove this when forking the kit.
+        if req.case_id.starts_with("preflight:") {
+            return Ok(self.preflight(&req, &user_id, started).await);
+        }
 
         // Observed execution: when the validator advertises a mock tool endpoint, execute
         // catalog tools through it (so the validator observes the trajectory and
