@@ -10,6 +10,8 @@ The kit is a working baseline plus the full local eval loop (tool calling +
 memory + speed) running locally against an embedded Turso (SQLite-family)
 database with native vector search inside the
 [ditto-harness](https://github.com/ditto-assistant/ditto-harness) crate.
+OpenRouter-backed models inherit its app attribution:
+`HTTP-Referer: https://heyditto.ai` and `X-OpenRouter-Title: Ditto`.
 
 It mirrors Ditto's production memory retrieval pipeline and ships the
 real ranking models as weights:

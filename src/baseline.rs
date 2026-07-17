@@ -49,7 +49,9 @@ use ditto_harness::agent::NoopHandler;
 use ditto_harness::chat::{Harness, Options, PrepareRequest, RunRequest as ChatRunRequest};
 use ditto_harness::db::Db;
 use ditto_harness::memory::{CompositeSearchRequest, SaveMemoryRequest, Store, StoreOptions};
-use ditto_harness::models::{ChatModelConfig, ModelParams, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL};
+use ditto_harness::models::{
+    ChatModelConfig, ModelParams, OllamaEmbedder, DEFAULT_OLLAMA_BASE_URL,
+};
 use ditto_harness::retrieval::{MlpPredictor, Reranker, Variant, WeightPredictor};
 use ditto_harness::types::{
     ChatMessage, Content, Embedder, Model, Result as HarnessResult, Tool, ToolDefinition,
