@@ -509,6 +509,24 @@ decoy), a metamorphic-consistency factor over invariance families, and the
 tool-efficiency factor. All three are detailed in
 [PROTOCOL.md](PROTOCOL.md) and are pure functions of the published run details.
 
+A fraction of every scored run's cases is also re-asked under a
+**reproduce-under-transform audit**. Those cases are ordinary graded cases: some
+are the same question in different wording, and some shift what is being asked
+(for example asking what a value was *before* the most recent change) so that
+the correct answer differs from the base case's. Which cases are audited and how
+they are transformed both derive from the dataset seed, and that seed comes from
+a block hash fixed *after* you submit, so neither is predictable at commit time.
+
+Practically: answer the question that is actually in front of you. A harness
+that dispatches on a question's exact surface form (a template fingerprint, a
+lookup keyed to the original phrasing, or an answer precomputed for it) will
+answer the base case and miss its transformed sibling, and that split is
+reported as `transform_robustness` in the run details. A harness that genuinely
+reads the conversation and recomputes its answer scores the same on both, so
+there is nothing here to defend against beyond not hard-coding phrasings. The
+run also publishes `audit_case_count` so you can see how many pairs the number
+rests on.
+
 10. Originality (duplicate detection). Before scoring, the platform compares
 your uploaded crate against every other miner's eligible submission across
 several dimensions: exact bytes, normalized source (comments, whitespace, and
@@ -547,6 +565,11 @@ deterministic tool grade is `0.4 name F1 + 0.4 argument F1 + 0.2 trajectory`
 per-case timeout scores 0, and the tool-efficiency multiplier bounds over-calling
 on observed runs. The rationale is in *What isn't scored, and why*. Measure with
 `practice`.
+- Do not key answers to a question's exact wording. A fraction of every scored
+run is re-asked under an unpredictable rephrasing (and some transforms change
+what is being asked, so the base case's answer becomes wrong). Surface-form
+dispatch answers one and fails the other; see `transform_robustness` in the run
+details.
 - Memory needs the seed user loaded + Ollama embeddings. Run `seed-user`
 first. If `mem-eval` reports `recall@k: 0.000`, see
 [SETUP.md](SETUP.md) → *Troubleshooting*.
