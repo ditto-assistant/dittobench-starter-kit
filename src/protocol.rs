@@ -99,7 +99,7 @@ pub struct RunRequest {
     pub user_input: String,
     #[serde(default)]
     pub tools: Vec<ToolDefWire>,
-    /// Optional (observed execution, `bench_version` 2): a validator-served mock
+    /// Optional (observed execution, `bench_version` 2 and 3): a validator-served mock
     /// tool-execution URL. When present, a harness should EXECUTE each non-memory
     /// catalog tool call by POSTing a [`ToolExecRequest`] here and using the
     /// returned [`ToolExecResponse::result`], instead of stubbing it locally. The

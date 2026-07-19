@@ -12,6 +12,9 @@ Returns `200 {"status":"ok"}`.
 The validator POSTs one case at a time. Two optional fields
 (`tool_endpoint`, `user_id`) may be present for observed tool execution; see
 [Observed tool execution](#observed-tool-execution-additive-optional) below.
+The same additive wire shape serves both immutable benchmark contracts: a
+v3-ready harness remains compatible with v2 validators, while v3 validators
+add the reserved reachability preflight described below.
 
 Request body, `RunRequest`:
 ```json
@@ -71,7 +74,7 @@ Request body, `SeedRequest`:
 ```
 Respond `200 { "pairs": N, "subjects": N, "links": N }` (counts loaded).
 
-DittoBench v2 seeding tiers (the memory side of the benchmark):
+DittoBench v2/v3 seeding tiers (the memory side of the benchmark):
 - Tier A: `pairs`, `subjects`, and `links` are all provided (retrieval in isolation).
 - Tier B (raw-pairs): `subjects: []`, `links: []`, so only raw conversation
   pairs are seeded. Your harness must build its own subject index from the
@@ -114,7 +117,24 @@ answer incorporates the value the executed tool returned, reported per case as
 `CaseScore.result_usage` (0-1).
 
 A harness that ignores `tool_endpoint` still scores, but self-reported tool
-calls on served categories are capped at 0.5.
+calls on served categories are capped at 0.5 in practice — and score 0 on the
+on-chain scored path, where observed execution is mandatory.
+
+### Reachability preflight (bench_version 3, REQUIRED on the scored path)
+
+Before any case is scored, the validator sends one probe turn: an ordinary
+`POST /run` whose `case_id` starts with the reserved prefix `preflight:` and
+whose `tool_endpoint` is set. On seeing that prefix your harness MUST POST one
+`ToolExecRequest` for a served tool to `tool_endpoint` (`search_web` with any
+args is sufficient) before responding. Hard-code the check on the `case_id`
+prefix — do not route it through your model; the probe verifies network
+reachability, not reasoning. The turn itself is never scored.
+
+If the validator observes no call across its probe attempts, the scored run
+**fails and is retried** instead of being scored — this protects you from an
+endpoint that is unreachable through no fault of yours, but it also means a
+harness that skips the probe never finalizes a score. The kit implements it in
+`Baseline::preflight` (`src/baseline.rs`); keep that path intact when forking.
 
 ## Dataset shapes (local practice)
 
@@ -131,7 +151,7 @@ calls on served categories are capped at 0.5.
   (`result_usage` is emitted only on observed-execution result-usage cases; omitted when 0)
 - `ScoreReport { run_id, generated_at, composite, tool_mean, memory_mean, median_ms, n, per_case[] }`
 
-### Scoring rules (local scorer; on-chain v2 differences below)
+### Scoring rules (local scorer; versioned on-chain differences below)
 
 Scoring is judge-free everywhere: deterministic, no LLM, and locally identical
 in kind to the on-chain grader.
@@ -154,7 +174,9 @@ Abstaining on an answerable case scores 0.
 (DittoBench v2, rebalanced from v1's `0.6 / 0.4` because memory is the core
 product value); otherwise it equals whichever mean exists.
 
-> The on-chain SN118 validator scores DittoBench v2: memory grades per
+> The on-chain SN118 scorer serves both immutable contracts. v2 remains
+> reproducible byte-for-byte; v3 keeps this wire shape while hardening the
+> generated cases and scored-path policy. Both versions grade memory per
 > `answer_kind` (value, number, list, ordered list, duration, reversal,
 > persistence, decline) with distractor and forbidden-value zeroing, across
 > question types `single-session-recall`, `multi-session`, `temporal-reasoning`,
@@ -163,7 +185,9 @@ product value); otherwise it equals whichever mean exists.
 > decline). The memory cases come from a fresh procedural persona universe per
 > seed (no fixed corpus to memorize), and a `dataset_sha256` in the score
 > `details` pins the exact dataset. The hosted dataset rotates, so local and
-> on-chain scores differ.
+> on-chain scores differ. See the public scorer's
+> [v2/v3 comparison](https://github.com/ditto-assistant/dittobench-api/blob/main/docs/dittobench-v2-vs-v3.md)
+> for the version-specific anti-gaming and integrity rules.
 
 ### On-chain tool grading and composite factors (differ from the local scorer)
 

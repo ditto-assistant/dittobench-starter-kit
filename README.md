@@ -248,10 +248,15 @@ input, available tools) and expects a `RunResponse` (final text, observed tool
 calls, token usage, latency). Before memory questions it installs a haystack via
 `POST /seed`. Full shapes in [PROTOCOL.md](PROTOCOL.md).
 
-### DittoBench v2 scoring
+### DittoBench versioned scoring
 
-Every submission gets a fresh procedural persona universe, and the composite
-is `0.5 × tool + 0.5 × memory`. The full grading rubric lives in [PROTOCOL.md](PROTOCOL.md).
+One scorer binary serves the immutable v2 and v3 contracts. A validator chooses
+the version assigned by the platform; this kit's additive wire protocol handles
+both, including v3's required scored-run preflight. Every submission gets a
+fresh procedural persona universe, and the composite is
+`0.5 × tool + 0.5 × memory`. The wire contract lives in
+[PROTOCOL.md](PROTOCOL.md); the public scorer documents the exact
+[v2/v3 differences](https://github.com/ditto-assistant/dittobench-api/blob/main/docs/dittobench-v2-vs-v3.md).
 [BASELINES.md](BASELINES.md) reports what the stock kit scores under the locked
 model (the target to beat) and its weakest categories.
 
@@ -315,7 +320,7 @@ Put your effort into the three levers above.
 Run `mem-eval` after retrieval changes (recall@k, no LLM) and `practice` after
 agent/tool changes (watch `composite`, per-category tool means, slowest cases).
 
-### Per-question-type levers (v2 memory suite)
+### Per-question-type levers (versioned memory suite)
 
 Every memory question type maps to a concrete mechanism in this kit (or one you
 can add). Nothing is scored that lacks a lever; the lever is the capability
@@ -441,7 +446,9 @@ produces a container serving that protocol on :8080.
 > Status: the hosted practice validator and the [SN118 leaderboard](https://platform-api.heyditto.ai/)
 > are live today. The on-chain submission path (`ditto upload`, eval fee, scoring,
 > weights) is not yet live, so no competitive scores populate the leaderboard yet.
-> It runs on `bench_version` 2, and this section documents that contract.
+> The activated benchmark remains `bench_version` 2 until the announced v3
+> epoch activation. The scorer already serves both v2 and v3, and this kit is
+> compatible with either contract.
 
 1. Registration. You need a hotkey registered on subnet netuid 118
 (`btcli subnet register --netuid 118`) and TAO for the registration cost plus
@@ -486,10 +493,13 @@ are available). Weights are recomputed
 from the public score ledger on every validator sweep. Being 2nd by 4% earns a
 tail share.
 
-7. bench_version. Only scores from the latest `bench_version` compete.
-When it bumps, validators automatically re-score the champion and top tail on
-the new version, so you don't need to resubmit or re-pay, though your standing can
-change. `bench_version` 2 is the launch version.
+7. bench_version. Only the platform's **activated** version drives rank and
+emissions. A version bump first re-scores a frozen top-five cohort in shadow;
+the old version stays canonical until every cohort member reaches the required
+three-validator quorum. You do not need to resubmit or re-pay, though your
+standing can change when the new version activates. During a gradual validator
+rollout, two v3-capable validators can leave every cohort member visibly at
+2/3 without mixing v2 and v3 scores or changing emissions.
 
 8. Lifecycle. After upload your agent goes `uploaded → evaluating → scored`, or `screening_failed` if the Docker build or `/health` fails (fix
 and resubmit). Scores land on the public score ledger and the
@@ -502,12 +512,32 @@ embedded injection payload, surfacing another user's value, or naming a
 distractor value zeroes the case, and those events land in the run's public
 details. Malformed responses, timeouts, and build failures score 0. Observed tool
 execution (the validator runs your tool calls against its own mock endpoint)
-caps unverified self-reported tool calls at 0.5. Beyond
+caps unverified self-reported tool calls at 0.5 in practice and v2; v3's scored
+path requires observed execution and assigns 0 to an unobserved observable
+case. Beyond
 per-case grading, the composite carries bounded integrity multipliers: a per-run
 canary nonce (bounded penalty for an honest miss, hard cap for leaking the
 decoy), a metamorphic-consistency factor over invariance families, and the
 tool-efficiency factor. All three are detailed in
 [PROTOCOL.md](PROTOCOL.md) and are pure functions of the published run details.
+
+A fraction of every scored run's cases is also re-asked under a
+**reproduce-under-transform audit**. Those cases are ordinary graded cases: some
+are the same question in different wording, and some shift what is being asked
+(for example asking what a value was *before* the most recent change) so that
+the correct answer differs from the base case's. Which cases are audited and how
+they are transformed both derive from the dataset seed, and that seed comes from
+a block hash fixed *after* you submit, so neither is predictable at commit time.
+
+Practically: answer the question that is actually in front of you. A harness
+that dispatches on a question's exact surface form (a template fingerprint, a
+lookup keyed to the original phrasing, or an answer precomputed for it) will
+answer the base case and miss its transformed sibling, and that split is
+reported as `transform_robustness` in the run details. A harness that genuinely
+reads the conversation and recomputes its answer scores the same on both, so
+there is nothing here to defend against beyond not hard-coding phrasings. The
+run also publishes `audit_case_count` so you can see how many pairs the number
+rests on.
 
 10. Originality (duplicate detection). Before scoring, the platform compares
 your uploaded crate against every other miner's eligible submission across
@@ -547,6 +577,11 @@ deterministic tool grade is `0.4 name F1 + 0.4 argument F1 + 0.2 trajectory`
 per-case timeout scores 0, and the tool-efficiency multiplier bounds over-calling
 on observed runs. The rationale is in *What isn't scored, and why*. Measure with
 `practice`.
+- Do not key answers to a question's exact wording. A fraction of every scored
+run is re-asked under an unpredictable rephrasing (and some transforms change
+what is being asked, so the base case's answer becomes wrong). Surface-form
+dispatch answers one and fails the other; see `transform_robustness` in the run
+details.
 - Memory needs the seed user loaded + Ollama embeddings. Run `seed-user`
 first. If `mem-eval` reports `recall@k: 0.000`, see
 [SETUP.md](SETUP.md) → *Troubleshooting*.
