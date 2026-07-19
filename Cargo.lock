@@ -338,7 +338,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -898,7 +898,7 @@ dependencies = [
 [[package]]
 name = "ditto-harness"
 version = "0.1.0"
-source = "git+https://github.com/ditto-assistant/ditto-harness?rev=b591cbc3d3d5d10b15857fec60385fecbae1c3bb#b591cbc3d3d5d10b15857fec60385fecbae1c3bb"
+source = "git+https://github.com/ditto-assistant/ditto-harness?rev=ba5b463aecd8eec38ada6aa9c2e6e8fac9c5be1d#ba5b463aecd8eec38ada6aa9c2e6e8fac9c5be1d"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2694,7 +2694,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn",
