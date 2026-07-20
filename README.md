@@ -250,6 +250,149 @@ input, available tools) and expects a `RunResponse` (final text, observed tool
 calls, token usage, latency). Before memory questions it installs a haystack via
 `POST /seed`. Full shapes in [PROTOCOL.md](PROTOCOL.md).
 
+### Test a seed-capable submission with a Ditto memory export
+
+The local submission lab validates a signed Ditto Memory Passport, converts it
+to staged `/seed` requests, then puts a multi-turn chat UI in front of a
+reviewed submission's `/run` endpoint. The target must implement `GET /health`,
+`POST /seed`, and `POST /run`. The authoritative contract in
+`dittobench-api/pkg/protocol/protocol.go` defines `/seed` and the optional
+`RunRequest.user_id` used for graph isolation, mirrored in this kit's
+[`PROTOCOL.md`](PROTOCOL.md) and baseline server. Use a reviewed adapter for an
+older submission that predates those fields.
+
+#### Reviewer workbench: drop a tarball and chat
+
+For the fastest manual review, start the browser workbench from a shell that
+already has the desired provider key:
+
+```bash
+python3 scripts/submission-workbench.py
+```
+
+It opens `http://127.0.0.1:4320`. Drop the reviewed submission tarball, choose
+OpenRouter, Chutes, or local Ollama, acknowledge local source execution, and
+click **Build, load & chat**. The Ditto Memory Passport ZIP is optional: omit it
+for a genuinely fresh blank-memory chat, or add it to experience the harness
+against real Ditto memories. The same page shows preparation, safe extraction,
+Cargo release build, harness health, and memory initialization progress before
+turning into a multi-turn chat. **Review another tarball** stops the current
+harness, removes its temporary files, and resets the page for the next
+submission.
+
+OpenRouter and Chutes appear as available only when `OPENROUTER_API_KEY` or
+`CHUTES_API_KEY` is present in the workbench process. Only the selected
+provider's key is passed to the child. When a Passport is present, the default
+quick-chat mode verifies the entire signed export but seeds only the first 100
+seedable conversations so a reviewer can reach chat quickly; select **Full
+export** for compatibility and long-tail retrieval testing. Neither mode
+changes the original export. Without a Passport, the workbench sends an empty
+`/seed` wave to create a fresh isolated user namespace before enabling chat.
+
+The workbench binds to loopback, stores uploads in a private temporary
+directory, displays the uploaded tarball's SHA-256, and never exposes memory
+contents or counts in its status API. It is still intentionally **not a code
+sandbox**: the acknowledged submission runs as your local account. Use a
+disposable VM or container for hostile or unreviewed code.
+
+The lower-level lab remains available for CI, digest-pinned runs, custom start
+commands, already-running harnesses, and Passport-only validation.
+
+Validate the export before exposing its contents to a harness. By default the
+lab verifies both the archive's Ed25519 signature and the signing key against
+Ditto's production API key endpoint (`https://api.heyditto.ai`):
+
+```bash
+python3 scripts/submission-lab.py \
+  --passport ~/Downloads/ditto-passport.zip \
+  --check-only
+```
+
+Then point it at an already-running, reviewed local harness. A base URL or its
+`/run` URL is accepted:
+
+```bash
+python3 scripts/submission-lab.py \
+  --passport ~/Downloads/ditto-passport.zip \
+  --agent-url http://127.0.0.1:8080/run \
+  --port 4320
+```
+
+The original cloud user ID is not reused: every run seeds a fresh random local
+user unless `--user-id` is supplied. The lab advertises the current read-only
+memory tool catalog and carries the last 20 messages (up to 10 user/assistant
+exchanges) in `system_prompt`; a submission that ignores that field may still
+behave as a single-turn agent.
+The UI starts as soon as validation and harness health checks pass, reports a
+`seeding`, `ready`, or `error` state, and rejects chat requests until every
+staged seed wave has completed. Seed failures expose only a non-private error
+category in `/api/meta`; memory IDs and backend response details stay out of the
+browser surface.
+
+For a faster subjective smoke test, pass `--max-pairs N`. The lab still verifies
+the complete Passport signature, manifest, counts, graph references, and issuer
+authority before selecting the first N seedable memories in signed export order.
+Only subjects and links referenced by that sample are retained. The local status
+reports `memory_scope: bounded_sample` without exposing a count or content. This
+mode is useful for quickly experiencing a harness, but it is not a full-export
+replay and must not be treated as a complete compatibility or quality verdict.
+Omitting `--max-pairs` always seeds the full validated export.
+
+For an offline real export, save a trusted base64url Ed25519 public key in a
+file and pass `--verification-key PATH`. `--trust-embedded-key` proves only
+archive integrity, not Ditto provenance, and is intended solely for synthetic
+fixtures or explicit offline experiments. Staging and local backend exports can
+use `--verification-base-url https://staging-api.heyditto.ai` (or a loopback
+backend origin); the signed issuer remains `https://heyditto.ai`.
+
+To start an audited submission tarball, pin the exact digest reviewed in
+Backroom and pass only the provider secret it actually needs:
+
+```bash
+python3 scripts/submission-lab.py \
+  --passport ~/Downloads/ditto-passport.zip \
+  --submission ~/Downloads/reviewed-submission.tar.gz \
+  --submission-sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --allow-run-untrusted \
+  --pass-env OPENROUTER_API_KEY \
+  --seed-max-request-bytes 25165824 \
+  --agent-port 8081 \
+  --port 4321
+```
+
+Important security boundaries:
+
+- Passport files and responses are size-bounded; signed file coverage, counts,
+  graph references, duplicate IDs, timestamps, and the issuer key are checked
+  before seeding. Signed historical rows with neither prompt nor response are
+  validated but omitted because the retrieval seed contract requires text.
+- The lab accepts loopback harness URLs by default. `--allow-remote-agent`
+  means the real memory export will be uploaded to that remote service and
+  requires HTTPS for the non-loopback URL.
+- Seed waves are limited by both pair count and serialized JSON size. Lower
+  `--seed-max-request-bytes` when an adapter has a smaller request-body limit.
+  A single pair and its linked subjects are never split across requests.
+- A child process gets a small build/runtime environment and no provider keys
+  unless named with `--pass-env`. The selected model provider can still receive
+  prompts and retrieved memory content during normal inference.
+- Digest pinning and safe extraction do not make miner code safe. The source
+  process is **not container-sandboxed**: it runs as your local account and can
+  access files and the network available to that account. Review it first and
+  use a disposable VM/container for hostile or uncertain submissions.
+- Gzip, bzip2, xz, and uncompressed tarballs are detected by their magic bytes
+  and read as a stream. One strict decompressed-byte limit covers tar headers,
+  padding, PAX/GNU metadata, file bodies, and trailing data; member-count and
+  declared file-size limits are also enforced before each body is extracted.
+  Conventional `.` and `./` root layouts are normalized, while traversal,
+  links, special files, duplicate names, case collisions, and file/directory
+  collisions are rejected.
+- Default Cargo startup uses the extraction root when it contains `Cargo.toml`,
+  or one non-hidden top-level wrapper directory containing `Cargo.toml`; missing
+  or ambiguous layouts fail closed. An explicit `--start-command` instead runs
+  from the extraction root so the lab never guesses a custom project's layout.
+- A source directory is mutable and cannot be pinned by this script. Prefer the
+  exact reviewed tarball plus `--submission-sha256` for reproducible tests.
+
 ### DittoBench versioned scoring
 
 One scorer binary serves the immutable v2 and v3 contracts. A validator chooses
