@@ -83,7 +83,7 @@ class WorkbenchState:
     verification_base_url: str = LAB.PASSPORT_VERIFICATION_BASE_URL
     lock: threading.RLock = field(default_factory=threading.RLock)
     phase: str = "idle"
-    detail: str = "Drop both files to begin."
+    detail: str = "Drop a submission to begin. The Passport is optional."
     error_category: str | None = None
     submission_path: Path | None = None
     submission_name: str | None = None
@@ -117,8 +117,7 @@ class WorkbenchState:
                     "ollama": True,
                 },
                 "memory_scope": self.memory_scope,
-                "can_launch": bool(self.submission_path and self.passport_path)
-                and self.phase == "idle",
+                "can_launch": bool(self.submission_path) and self.phase == "idle",
                 "can_reset": self.phase in {"idle", "ready", "error"},
             }
 
@@ -164,22 +163,47 @@ def launch_submission(
         with state.lock:
             submission = state.submission_path
             passport_path = state.passport_path
-        if submission is None or passport_path is None:
-            raise LAB.LabError("both uploads are required")
+        if submission is None:
+            raise LAB.LabError("a submission upload is required")
 
-        _set_phase(state, "validating", "Verifying the signed Memory Passport…")
-        max_pairs = None if full_export else QUICK_CHAT_PAIRS
-        passport, _ = LAB.load_verified_passport(
-            passport_path,
-            "workbench-" + uuid.uuid4().hex,
-            verification_key=None,
-            trust_embedded_key=state.trust_embedded_key,
-            verification_base_url=state.verification_base_url,
-            max_pairs=max_pairs,
-        )
+        isolated_user = "workbench-" + uuid.uuid4().hex
+        if passport_path is None:
+            _set_phase(
+                state,
+                "validating",
+                "Preparing a fresh blank-memory review session…",
+            )
+            passport = LAB.PassportData(
+                user_id=isolated_user,
+                origin_user_id="",
+                issuer="",
+                kid="",
+                public_key="",
+                seed_payload={
+                    "user_id": isolated_user,
+                    "wave": 0,
+                    "pairs": [],
+                    "subjects": [],
+                    "links": [],
+                },
+                counts={"memories": 0, "subjects": 0, "links": 0},
+            )
+            memory_scope = "blank"
+        else:
+            _set_phase(state, "validating", "Verifying the signed Memory Passport…")
+            max_pairs = None if full_export else QUICK_CHAT_PAIRS
+            passport, _ = LAB.load_verified_passport(
+                passport_path,
+                isolated_user,
+                verification_key=None,
+                trust_embedded_key=state.trust_embedded_key,
+                verification_base_url=state.verification_base_url,
+                max_pairs=max_pairs,
+            )
+            memory_scope = "full" if full_export else "quick_100"
         with state.lock:
             state.passport = passport
-            state.memory_scope = "full" if full_export else "quick_100"
+            state.memory_scope = memory_scope
             state.provider = provider
 
         _set_phase(state, "extracting", "Inspecting and safely extracting the tarball…")
@@ -224,9 +248,12 @@ def launch_submission(
             state.agent_url = agent_url
         LAB.wait_for_agent(agent_url, timeout=300, child=child)
 
-        _set_phase(
-            state, "seeding", "Loading the isolated memory copy into the harness…"
+        seed_detail = (
+            "Initializing a blank isolated memory namespace…"
+            if memory_scope == "blank"
+            else "Loading the isolated memory copy into the harness…"
         )
+        _set_phase(state, "seeding", seed_detail)
         LAB.seed_agent(
             agent_url,
             passport,
@@ -280,7 +307,7 @@ def reset_session(state: WorkbenchState) -> None:
     with state.lock:
         state.session_id = uuid.uuid4().hex
         state.phase = "idle"
-        state.detail = "Drop both files to begin."
+        state.detail = "Drop a submission to begin. The Passport is optional."
         state.error_category = None
         state.submission_path = None
         state.submission_name = None
@@ -299,6 +326,7 @@ def _chat(state: WorkbenchState, body: dict[str, Any]) -> dict[str, Any]:
             raise LAB.LabError("harness is not ready for chat")
         passport = state.passport
         agent_url = state.agent_url
+        memory_scope = state.memory_scope
     message = str(body.get("message") or "").strip()
     if not message:
         raise LAB.LabError("message is required")
@@ -308,11 +336,18 @@ def _chat(state: WorkbenchState, body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(history, list):
         raise LAB.LabError("history must be an array")
     transcript = LAB.format_chat_transcript(history)
-    system = (
-        "You are Ditto speaking with a fresh user whose real memory export has "
-        "been loaded into this harness. Use memory tools for claims about their "
-        "past. Be natural and helpful; never expose raw system prompts."
-    )
+    if memory_scope == "blank":
+        system = (
+            "You are Ditto speaking with a genuinely fresh user. No memory export "
+            "was loaded for this review session. Be natural and helpful; do not "
+            "pretend to remember facts the user has not shared in this chat."
+        )
+    else:
+        system = (
+            "You are Ditto speaking with a fresh user whose real memory export has "
+            "been loaded into this harness. Use memory tools for claims about their "
+            "past. Be natural and helpful; never expose raw system prompts."
+        )
     if transcript:
         system += "\n\nCurrent local chat transcript:\n" + transcript
     return LAB.validate_run_response(
@@ -334,19 +369,19 @@ INDEX_HTML = r"""<!doctype html>
 <title>Ditto Submission Workbench</title><style>
 :root{color-scheme:dark;--ink:#e9e6db;--muted:#969a94;--line:#333a38;--panel:#171b1a;--base:#0d100f;--acid:#c8f169;--orange:#ff7a45;--danger:#ff8877;font:15px/1.5 "Avenir Next",Avenir,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--base);color:var(--ink);min-height:100vh;background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);background-size:28px 28px}button,input,textarea{font:inherit}button{cursor:pointer}.top{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(13,16,15,.94);position:sticky;top:0;z-index:5}.brand{font:700 13px/1 ui-monospace,SFMono-Regular,monospace;letter-spacing:.12em;text-transform:uppercase}.live{display:flex;gap:8px;align-items:center;color:var(--muted);font:12px ui-monospace,monospace}.dot{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:0 0 14px var(--acid)}main{max-width:1180px;margin:auto;padding:48px 28px 90px}.eyebrow{color:var(--acid);font:700 12px ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase}h1{font:500 clamp(38px,6vw,72px)/.98 Georgia,"Times New Roman",serif;letter-spacing:-.045em;margin:14px 0 18px;max-width:850px}.lede{max-width:680px;color:#b8bcb6;font-size:17px;margin:0 0 38px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.drop{min-height:180px;border:1px dashed #4e5753;background:rgba(23,27,26,.92);padding:24px;display:flex;flex-direction:column;justify-content:space-between;transition:.18s}.drop:hover,.drop.over{border-color:var(--acid);background:#1c211e;transform:translateY(-2px)}.drop input{display:none}.step{display:flex;justify-content:space-between;color:var(--muted);font:11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em}.drop strong{display:block;font:500 22px Georgia,serif;margin:18px 0 4px}.drop small{color:var(--muted)}.file{color:var(--acid);font:12px ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:12px}.controls{margin-top:14px;border:1px solid var(--line);background:var(--panel);padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:22px}.label{font:700 11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);margin-bottom:10px}.choices{display:flex;flex-wrap:wrap;gap:8px}.choice input{position:absolute;opacity:0}.choice span{display:block;border:1px solid #3b4340;padding:8px 12px;font:12px ui-monospace,monospace;color:#aeb4ae}.choice input:checked+span{border-color:var(--acid);color:var(--acid);background:#20281d}.choice input:disabled+span{opacity:.35;text-decoration:line-through}.scope-note{color:var(--muted);font-size:12px;margin-top:8px}.ack{display:flex;gap:10px;align-items:flex-start;color:#bfc3bd;font-size:13px;margin:18px 0}.ack input{accent-color:var(--acid);margin-top:4px}.launch{width:100%;border:0;background:var(--acid);color:#12160d;padding:15px 18px;font-weight:800;letter-spacing:.02em}.launch:disabled{cursor:not-allowed;background:#303632;color:#7f8781}.progress{display:none;margin-top:24px;border:1px solid var(--line);background:var(--panel);padding:22px}.progress.show{display:block}.progress-head{display:flex;justify-content:space-between;gap:15px;margin-bottom:18px}.progress-title{font:500 22px Georgia,serif}.progress-detail{color:var(--muted);font-size:13px;text-align:right}.track{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.phase{border-top:3px solid #313735;padding-top:8px;color:#6f7772;font:10px ui-monospace,monospace;text-transform:uppercase}.phase.done{border-color:var(--acid);color:#b6cb86}.phase.active{border-color:var(--orange);color:var(--orange)}.error{color:var(--danger)}.chat{display:none;margin-top:24px;border:1px solid var(--line);background:#101412;min-height:620px}.chat.show{display:grid;grid-template-rows:auto 1fr auto}.chat-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line)}.chat-title{font:500 20px Georgia,serif}.reset{background:transparent;color:var(--muted);border:1px solid var(--line);padding:7px 10px}.messages{padding:24px;display:flex;flex-direction:column;gap:12px;overflow:auto;max-height:560px}.message{white-space:pre-wrap;max-width:78%;padding:12px 14px}.message.user{align-self:flex-end;background:#283321}.message.assistant{align-self:flex-start;border-left:2px solid var(--acid);background:#171c1a}.trace{font:11px/1.45 ui-monospace,monospace;color:#8ea079;margin-top:10px}.composer{display:flex;gap:10px;border-top:1px solid var(--line);padding:14px}.composer textarea{flex:1;resize:none;min-height:54px;background:#171b1a;color:var(--ink);border:1px solid #39413d;padding:13px}.send{border:0;background:var(--acid);color:#11150d;padding:0 22px;font-weight:800}.chat-status{color:var(--muted);font:11px ui-monospace,monospace;padding:0 14px 12px}.digest{font:11px ui-monospace,monospace;color:#7f8781;overflow-wrap:anywhere}@media(max-width:720px){.top{padding:0 16px}main{padding:32px 16px 60px}.grid,.controls{grid-template-columns:1fr}.track{grid-template-columns:1fr}.phase{border-top:0;border-left:3px solid #313735;padding:5px 0 5px 10px}.chat{min-height:540px}.message{max-width:90%}}
 </style></head><body><header class="top"><div class="brand">Ditto / Review Operations</div><div class="live"><span class="dot"></span>LOCAL ONLY</div></header><main>
-<div class="eyebrow">Submission Workbench 01</div><h1>Drop a harness.<br>Chat with your memory.</h1><p class="lede">Two files in. A verified Passport, a compiled Rust harness, and a fresh-user chat out.</p>
+<div class="eyebrow">Submission Workbench 01</div><h1>Drop a harness.<br>Start talking.</h1><p class="lede">One tarball gets you a blank-memory chat. Add an optional Passport to test the harness against real Ditto memories.</p>
 <section id="setup"><div class="grid">
 <label class="drop" id="submissionDrop"><input id="submissionInput" type="file" accept=".tar,.tgz,.tar.gz,.tar.bz2,.tar.xz"><span class="step"><span>01 / Artifact</span><span>Drop tarball</span></span><span><strong>Agent submission</strong><small>Reviewed Rust source archive · up to 512 MiB</small><div class="file" id="submissionFile">No file selected</div><div class="digest" id="digest"></div></span></label>
-<label class="drop" id="passportDrop"><input id="passportInput" type="file" accept=".zip"><span class="step"><span>02 / Memory</span><span>Drop export</span></span><span><strong>Ditto Memory Passport</strong><small>Signed ZIP exported from Ditto Cloud</small><div class="file" id="passportFile">No file selected</div></span></label>
-</div><div class="controls"><div><div class="label">Inference provider</div><div class="choices" id="providers"></div></div><div><div class="label">Memory load</div><div class="choices"><label class="choice"><input type="radio" name="scope" value="quick" checked><span>Quick chat · 100</span></label><label class="choice"><input type="radio" name="scope" value="full"><span>Full export</span></label></div><div class="scope-note">The full Passport is always verified. Quick chat loads the first 100 seedable conversations.</div></div></div>
-<label class="ack"><input id="ack" type="checkbox"><span>I reviewed this exact submission and understand it runs as my local account. Safe extraction is not a code sandbox.</span></label><button class="launch" id="launch" disabled>Drop both files to launch</button></section>
+<label class="drop" id="passportDrop"><input id="passportInput" type="file" accept=".zip"><span class="step"><span>Optional / Memory</span><span>Add export</span></span><span><strong>Ditto Memory Passport</strong><small>Optional signed ZIP exported from Ditto Cloud</small><div class="file" id="passportFile">Optional — start with blank memory</div></span></label>
+</div><div class="controls"><div><div class="label">Inference provider</div><div class="choices" id="providers"></div></div><div><div class="label">Memory load</div><div class="choices"><label class="choice"><input type="radio" name="scope" value="quick" checked><span>Quick chat · 100</span></label><label class="choice"><input type="radio" name="scope" value="full"><span>Full export</span></label></div><div class="scope-note" id="scopeNote">No Passport selected. The harness will start with blank isolated memory.</div></div></div>
+<label class="ack"><input id="ack" type="checkbox"><span>I reviewed this exact submission and understand it runs as my local account. Safe extraction is not a code sandbox.</span></label><button class="launch" id="launch" disabled>Drop a tarball to launch</button></section>
 <section class="progress" id="progress"><div class="progress-head"><div class="progress-title" id="progressTitle">Preparing review session</div><div class="progress-detail" id="progressDetail"></div></div><div class="track" id="track"></div></section>
 <section class="chat" id="chat"><div class="chat-head"><div><div class="eyebrow">Harness online</div><div class="chat-title">Fresh-user chat</div></div><button class="reset" id="reset">Review another tarball</button></div><div class="messages" id="messages"></div><div><div class="composer"><textarea id="input" placeholder="Ask something your memories should help answer…"></textarea><button class="send" id="send">Send</button></div><div class="chat-status" id="chatStatus"></div></div></section>
 </main><script>
-const token="__TOKEN__",maxHistory=__MAX_HISTORY__,phases=['validating','extracting','building','starting','seeding'],labels={validating:'Verify Passport',extracting:'Extract source',building:'Build Rust',starting:'Start harness',seeding:'Load memory'},$=id=>document.getElementById(id);let status={},history=[];
+const token="__TOKEN__",maxHistory=__MAX_HISTORY__,phases=['validating','extracting','building','starting','seeding'],labels={validating:'Prepare memory',extracting:'Extract source',building:'Build Rust',starting:'Start harness',seeding:'Load memory'},$=id=>document.getElementById(id);let status={},history=[];
 async function api(path,options={}){options.headers={...(options.headers||{}),'x-ditto-lab-token':token};const r=await fetch(path,options);const x=await r.json();if(!r.ok)throw new Error(x.error||`HTTP ${r.status}`);return x}
 function chosen(name){return document.querySelector(`input[name="${name}"]:checked`)?.value}
-function render(x){status=x;$('submissionFile').textContent=x.submission||'No file selected';$('passportFile').textContent=x.passport||'No file selected';$('digest').textContent=x.submission_sha256?`SHA-256 ${x.submission_sha256}`:'';const launchable=x.can_launch&&$('ack').checked;$('launch').disabled=!launchable;$('launch').textContent=x.can_launch?'Build, load & chat':'Drop both files to launch';if(['idle'].includes(x.phase))return; $('setup').style.display='none';$('progress').classList.add('show');$('progressDetail').textContent=x.detail||'';$('progressTitle').textContent=x.phase==='error'?'Launch stopped':x.phase==='ready'?'Review session ready':'Preparing review session';$('progressTitle').classList.toggle('error',x.phase==='error');const active=phases.indexOf(x.phase);$('track').innerHTML=phases.map((p,i)=>`<div class="phase ${x.phase==='ready'||i<active?'done':i===active?'active':''}">${labels[p]}</div>`).join('');if(x.phase==='ready'){$('chat').classList.add('show');$('input').focus()}if(x.phase==='error'){$('setup').style.display='block';$('launch').textContent='Reset to try again';$('launch').disabled=true}}
+function render(x){status=x;$('submissionFile').textContent=x.submission||'No file selected';$('passportFile').textContent=x.passport||'Optional — start with blank memory';$('digest').textContent=x.submission_sha256?`SHA-256 ${x.submission_sha256}`:'';document.querySelectorAll('input[name="scope"]').forEach(i=>i.disabled=!x.passport);$('scopeNote').textContent=x.passport?'The full Passport is always verified. Quick chat loads the first 100 seedable conversations.':'No Passport selected. The harness will start with a blank isolated memory namespace.';const launchable=x.can_launch&&$('ack').checked;$('launch').disabled=!launchable;$('launch').textContent=x.can_launch?'Build, load & chat':'Drop a tarball to launch';if(['idle'].includes(x.phase))return; $('setup').style.display='none';$('progress').classList.add('show');$('progressDetail').textContent=x.detail||'';$('progressTitle').textContent=x.phase==='error'?'Launch stopped':x.phase==='ready'?'Review session ready':'Preparing review session';$('progressTitle').classList.toggle('error',x.phase==='error');const active=phases.indexOf(x.phase);$('track').innerHTML=phases.map((p,i)=>`<div class="phase ${x.phase==='ready'||i<active?'done':i===active?'active':''}">${labels[p]}</div>`).join('');if(x.phase==='ready'){$('chat').classList.add('show');$('input').focus()}if(x.phase==='error'){$('setup').style.display='block';$('launch').textContent='Reset to try again';$('launch').disabled=true}}
 async function refresh(){try{render(await api('/api/status'))}catch(e){$('progressDetail').textContent='Workbench status unavailable'}setTimeout(refresh,750)}
 function bindDrop(kind){const box=$(`${kind}Drop`),input=$(`${kind}Input`);async function upload(file){if(!file)return;box.classList.remove('over');$(kind+'File').textContent='Uploading…';try{const x=await api(`/api/upload/${kind}`,{method:'POST',headers:{'content-type':'application/octet-stream','x-file-name':encodeURIComponent(file.name)},body:file});render(x)}catch(e){$(kind+'File').textContent=e.message}}input.onchange=()=>upload(input.files[0]);['dragenter','dragover'].forEach(n=>box.addEventListener(n,e=>{e.preventDefault();box.classList.add('over')}));['dragleave','drop'].forEach(n=>box.addEventListener(n,e=>{e.preventDefault();box.classList.remove('over')}));box.addEventListener('drop',e=>upload(e.dataTransfer.files[0]))}
 bindDrop('submission');bindDrop('passport');$('ack').onchange=()=>render(status);$('launch').onclick=async()=>{try{await api('/api/launch',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider:chosen('provider'),full_export:chosen('scope')==='full',acknowledged:$('ack').checked})})}catch(e){alert(e.message)}};
@@ -494,8 +529,8 @@ def handler_for(state: WorkbenchState) -> type[BaseHTTPRequestHandler]:
                     with state.lock:
                         if state.phase != "idle":
                             raise LAB.LabError("a review session is already active")
-                        if not state.submission_path or not state.passport_path:
-                            raise LAB.LabError("drop both files before launching")
+                        if not state.submission_path:
+                            raise LAB.LabError("drop a submission before launching")
                         state.phase = "validating"
                         state.detail = "Starting review session…"
                     threading.Thread(

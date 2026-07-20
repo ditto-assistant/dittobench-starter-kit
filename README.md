@@ -270,20 +270,24 @@ already has the desired provider key:
 python3 scripts/submission-workbench.py
 ```
 
-It opens `http://127.0.0.1:4320`. Drop the reviewed submission tarball and a
-Ditto Memory Passport ZIP into the page, choose OpenRouter, Chutes, or local
-Ollama, acknowledge local source execution, and click **Build, load & chat**.
-The same page shows Passport verification, safe extraction, Cargo release
-build, harness health, and memory loading progress before turning into a
-multi-turn chat. **Review another tarball** stops the current harness, removes
-its temporary files, and resets the page for the next submission.
+It opens `http://127.0.0.1:4320`. Drop the reviewed submission tarball, choose
+OpenRouter, Chutes, or local Ollama, acknowledge local source execution, and
+click **Build, load & chat**. The Ditto Memory Passport ZIP is optional: omit it
+for a genuinely fresh blank-memory chat, or add it to experience the harness
+against real Ditto memories. The same page shows preparation, safe extraction,
+Cargo release build, harness health, and memory initialization progress before
+turning into a multi-turn chat. **Review another tarball** stops the current
+harness, removes its temporary files, and resets the page for the next
+submission.
 
 OpenRouter and Chutes appear as available only when `OPENROUTER_API_KEY` or
 `CHUTES_API_KEY` is present in the workbench process. Only the selected
-provider's key is passed to the child. The default quick-chat mode verifies the
-entire signed Passport but seeds only the first 100 seedable conversations so a
-reviewer can reach chat quickly; select **Full export** for compatibility and
-long-tail retrieval testing. Neither mode changes the original export.
+provider's key is passed to the child. When a Passport is present, the default
+quick-chat mode verifies the entire signed export but seeds only the first 100
+seedable conversations so a reviewer can reach chat quickly; select **Full
+export** for compatibility and long-tail retrieval testing. Neither mode
+changes the original export. Without a Passport, the workbench sends an empty
+`/seed` wave to create a fresh isolated user namespace before enabling chat.
 
 The workbench binds to loopback, stores uploads in a private temporary
 directory, displays the uploaded tarball's SHA-256, and never exposes memory

@@ -77,6 +77,7 @@ class SubmissionWorkbenchTest(unittest.TestCase):
         self.assertIn("Drop a harness", page)
         self.assertIn("Agent submission", page)
         self.assertIn("Ditto Memory Passport", page)
+        self.assertIn("Optional — start with blank memory", page)
         self.assertIn("Build, load & chat", page)
         self.assertNotIn("OPENROUTER_API_KEY=", page)
 
@@ -95,7 +96,7 @@ class SubmissionWorkbenchTest(unittest.TestCase):
             len(str(uploaded["submission_sha256"])),
             64,
         )
-        self.assertFalse(uploaded["can_launch"])
+        self.assertTrue(uploaded["can_launch"])
 
         _, uploaded = self.request(
             "/api/upload/passport",
@@ -115,9 +116,7 @@ class SubmissionWorkbenchTest(unittest.TestCase):
     def test_launch_requires_review_acknowledgement(self) -> None:
         self.state.session_dir.mkdir(parents=True)
         self.state.submission_path = self.state.session_dir / "submission.tar"
-        self.state.passport_path = self.state.session_dir / "passport.zip"
         self.state.submission_path.write_bytes(b"tar")
-        self.state.passport_path.write_bytes(b"zip")
         request = urllib.request.Request(
             self.base + "/api/launch",
             data=b'{"provider":"ollama","acknowledged":false}',
@@ -175,6 +174,38 @@ class SubmissionWorkbenchTest(unittest.TestCase):
         )
         wait.assert_called_once()
         seed.assert_called_once()
+
+    def test_launch_without_passport_seeds_blank_isolated_user(self) -> None:
+        self.state.session_dir.mkdir(parents=True)
+        submission = self.state.session_dir / "submission.tar"
+        with tarfile.open(submission, "w") as archive:
+            content = b"[package]\nname='reviewed'\nversion='0.1.0'\n"
+            info = tarfile.TarInfo("Cargo.toml")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        self.state.submission_path = submission
+        built = mock.Mock(returncode=0)
+        child = FakeChild()
+        with (
+            mock.patch.object(WORKBENCH.LAB, "load_verified_passport") as load_passport,
+            mock.patch.object(WORKBENCH.subprocess, "run", return_value=built),
+            mock.patch.object(WORKBENCH.subprocess, "Popen", return_value=child),
+            mock.patch.object(WORKBENCH.LAB, "wait_for_agent"),
+            mock.patch.object(WORKBENCH.LAB, "seed_agent") as seed,
+        ):
+            WORKBENCH.launch_submission(
+                self.state,
+                provider="ollama",
+                full_export=False,
+            )
+        load_passport.assert_not_called()
+        self.assertEqual(self.state.phase, "ready")
+        self.assertEqual(self.state.memory_scope, "blank")
+        seeded = seed.call_args.args[1]
+        self.assertTrue(seeded.user_id.startswith("workbench-"))
+        self.assertEqual(seeded.seed_payload["pairs"], [])
+        self.assertEqual(seeded.seed_payload["subjects"], [])
+        self.assertEqual(seeded.seed_payload["links"], [])
 
     def test_provider_environment_passes_only_selected_secret(self) -> None:
         with mock.patch.dict(
