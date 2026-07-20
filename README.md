@@ -261,6 +261,39 @@ reviewed submission's `/run` endpoint. The target must implement `GET /health`,
 [`PROTOCOL.md`](PROTOCOL.md) and baseline server. Use a reviewed adapter for an
 older submission that predates those fields.
 
+#### Reviewer workbench: drop a tarball and chat
+
+For the fastest manual review, start the browser workbench from a shell that
+already has the desired provider key:
+
+```bash
+python3 scripts/submission-workbench.py
+```
+
+It opens `http://127.0.0.1:4320`. Drop the reviewed submission tarball and a
+Ditto Memory Passport ZIP into the page, choose OpenRouter, Chutes, or local
+Ollama, acknowledge local source execution, and click **Build, load & chat**.
+The same page shows Passport verification, safe extraction, Cargo release
+build, harness health, and memory loading progress before turning into a
+multi-turn chat. **Review another tarball** stops the current harness, removes
+its temporary files, and resets the page for the next submission.
+
+OpenRouter and Chutes appear as available only when `OPENROUTER_API_KEY` or
+`CHUTES_API_KEY` is present in the workbench process. Only the selected
+provider's key is passed to the child. The default quick-chat mode verifies the
+entire signed Passport but seeds only the first 100 seedable conversations so a
+reviewer can reach chat quickly; select **Full export** for compatibility and
+long-tail retrieval testing. Neither mode changes the original export.
+
+The workbench binds to loopback, stores uploads in a private temporary
+directory, displays the uploaded tarball's SHA-256, and never exposes memory
+contents or counts in its status API. It is still intentionally **not a code
+sandbox**: the acknowledged submission runs as your local account. Use a
+disposable VM or container for hostile or unreviewed code.
+
+The lower-level lab remains available for CI, digest-pinned runs, custom start
+commands, already-running harnesses, and Passport-only validation.
+
 Validate the export before exposing its contents to a harness. By default the
 lab verifies both the archive's Ed25519 signature and the signing key against
 Ditto's production API key endpoint (`https://api.heyditto.ai`):
