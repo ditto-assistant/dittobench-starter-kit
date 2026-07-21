@@ -27,7 +27,7 @@ classes are genuinely hard for a simple retrieval kit.
 
 ## New v6 complexity classes (your biggest levers)
 
-The stock kit scores near zero on every new class — each rewards a distinct
+The stock kit scores near zero on every new class: each rewards a distinct
 aligned capability the parser/simple-retrieval baseline cannot fake:
 
 | category | stock mean | what it rewards |
@@ -66,7 +66,7 @@ no relay-token budget applies. Median latency about 13 s per case (reported, not
 scored).
 
 v5 is a harder contract than v2 (composite 0.492), by construction. The **tool
-half stays near its v2 ceiling** (0.763 vs 0.793) — tool selection is not where
+half stays near its v2 ceiling** (0.763 vs 0.793): tool selection is not where
 the competition is. Everything moved to the **memory half (0.226)** and the new
 gates:
 
@@ -75,7 +75,7 @@ gates:
   far more than it did in v2. This is a recall gap, not an unwinnable task: an
   ideal full-context reader of the same datasets (every memory in context, no
   retrieval step) scores ~0.85 overall and 1.00 on single-session-recall, versus
-  the stock kit's 0.08 — the answers are there, the stock retriever just doesn't
+  the stock kit's 0.08: the answers are there, the stock retriever just doesn't
   surface them. Better retrieval is the first lever.
 - **Conversational-sanity (0.200) is a real weak spot for the stock kit**, not a
   strength: it is a retrieval kit, not conversationally grounded, so it leaks on
@@ -102,7 +102,7 @@ The reference harness fails these most often, so they carry the most upside:
 the calendar-create tool though it is offered every run; a tool-use prompt fixes
 it). `multi-hop-relational` and `temporal-depth` are the new v5 capability
 dimensions (cross-session KG-join and second-most-recent-value): the stock kit has
-no join or temporal-depth logic, so it scores 0.00 — the largest structured
+no join or temporal-depth logic, so it scores 0.00: the largest structured
 levers, and winnable (a strong retrieval harness clears them). The remaining rows
 are retrieval-recall and reasoning gaps.
 
