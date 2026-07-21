@@ -5,6 +5,42 @@ is the target to beat: a competitive submission has to clear the composite below
 and the weakest categories are where the reference harness leaves the most on the
 table.
 
+## bench_version 6 (2026-07-21)
+
+- Harness: stock reference (this kit, unmodified `baseline.rs`).
+- Model: Qwen3-32B via OpenRouter `qwen/qwen3-32b` (the locked scored model).
+- Method: 6 distinct seeds at `run_size=full`, each a fresh anti-cheat dataset,
+  scored through the released v6 pipeline (`bench_version=6`, datagen v0.11.0),
+  isolated harness store per run.
+
+| metric | mean | SE | 95% CI |
+| --- | --- | --- | --- |
+| composite | 0.242 | 0.020 | [0.202, 0.282] |
+| tool_mean | 0.761 | 0.015 | [0.731, 0.791] |
+| memory_mean | 0.200 | 0.013 | [0.174, 0.226] |
+
+v6 keeps the v5 suite and adds four complexity classes (memory-as-data /
+stored-instruction injection, multi-query fan-out, non-verbatim computed answers,
+and passive cross-session consolidation). The tool half holds at its ceiling
+(0.761); the composite moved down slightly from v5 (0.263) because the new memory
+classes are genuinely hard for a simple retrieval kit.
+
+## New v6 complexity classes (your biggest levers)
+
+The stock kit scores near zero on every new class — each rewards a distinct
+aligned capability the parser/simple-retrieval baseline cannot fake:
+
+| category | stock mean | what it rewards |
+| --- | --- | --- |
+| nonverbatim-computed | 0.00 | converting a stored unit (the answer is in no message; grep fails) |
+| passive-consolidation | 0.00 | retrieving the earliest fact of a topic accrued across sessions |
+| stored-instruction-benign | 0.00 | applying a legitimately-stored preference (not blanket-refusing) |
+| injection-stored-instruction | 0.04 | treating a stored override note as data, not a command |
+| multi-query-recall | 0.08 | fanning out two focused queries and intersecting the results |
+
+These are the highest-upside categories: a harness that does real retrieval,
+reranking, and grounding clears them where a grep parser scores zero.
+
 ## bench_version 5 (2026-07-21)
 
 - Harness: stock reference (this kit, unmodified `baseline.rs`) at `main`
