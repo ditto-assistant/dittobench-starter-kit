@@ -560,6 +560,14 @@ pub enum ModelProvider {
     OpenRouter { model: String },
     /// Ticket-scoped platform relay used by canonical benchmark v7 runs.
     Platform { base_url: String, model: String },
+    /// Soft-deprecated OpenAI-compatible adapter reserved for the injected v6
+    /// transition relay. It has no public-provider default and is removed once
+    /// the frozen v6 cohort drains.
+    LegacyV6Compat {
+        base_url: String,
+        api_key: String,
+        model: String,
+    },
     /// Local Ollama server.
     Ollama { base_url: String, model: String },
 }
@@ -570,7 +578,43 @@ impl ModelProvider {
         match self {
             ModelProvider::OpenRouter { model } => model,
             ModelProvider::Platform { model, .. } => model,
+            ModelProvider::LegacyV6Compat { model, .. } => model,
             ModelProvider::Ollama { model, .. } => model,
+        }
+    }
+
+    fn from_provider_with(provider: &str, env: impl Fn(&str) -> Option<String>) -> ModelProvider {
+        match provider {
+            "platform" => ModelProvider::Platform {
+                base_url: env("DITTOBENCH_INFERENCE_BASE_URL")
+                    .expect("DITTOBENCH_INFERENCE_BASE_URL is required for platform inference"),
+                model: env("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|| DEFAULT_OPENROUTER_MODEL.to_string()),
+            },
+            // The v6 scorer still injects this historical provider selector,
+            // but its URL points at the trusted local compatibility relay. Do
+            // not add a hosted Chutes default or expose it as a local option.
+            "chutes" => ModelProvider::LegacyV6Compat {
+                base_url: env("CHUTES_BASE_URL")
+                    .expect("CHUTES_BASE_URL is required for legacy v6 compatibility"),
+                api_key: env("CHUTES_API_KEY")
+                    .or_else(|| env("OPENAI_API_KEY"))
+                    .expect("CHUTES_API_KEY is required for legacy v6 compatibility"),
+                model: env("DITTOBENCH_MODEL").unwrap_or_else(|| "qwen/qwen3-32b".to_string()),
+            },
+            "ollama" => ModelProvider::Ollama {
+                base_url: env("OLLAMA_BASE_URL")
+                    .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string()),
+                model: env("DITTOBENCH_MODEL").unwrap_or_else(|| "qwen2.5:7b".to_string()),
+            },
+            _ => ModelProvider::OpenRouter {
+                // EXTENSION POINT: change this default model. It sets only LOCAL
+                // practice runs and defaults to the on-chain scored model.
+                // Benchmark v7 scoring locks inference to GPT-OSS-20B through
+                // the platform relay and overrides whatever a submission sets.
+                model: env("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|| DEFAULT_OPENROUTER_MODEL.to_string()),
+            },
         }
     }
 
@@ -581,28 +625,7 @@ impl ModelProvider {
         let provider = std::env::var("DITTOBENCH_PROVIDER")
             .unwrap_or_else(|_| "openrouter".to_string())
             .to_lowercase();
-        match provider.as_str() {
-            "platform" => ModelProvider::Platform {
-                base_url: std::env::var("DITTOBENCH_INFERENCE_BASE_URL")
-                    .expect("DITTOBENCH_INFERENCE_BASE_URL is required for platform inference"),
-                model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| DEFAULT_OPENROUTER_MODEL.to_string()),
-            },
-            "ollama" => ModelProvider::Ollama {
-                base_url: std::env::var("OLLAMA_BASE_URL")
-                    .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string()),
-                model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| "qwen2.5:7b".to_string()),
-            },
-            _ => ModelProvider::OpenRouter {
-                // EXTENSION POINT: change this default model. It sets only LOCAL
-                // practice runs and defaults to the on-chain scored model.
-                // Benchmark v7 scoring locks inference to GPT-OSS-20B through
-                // the platform relay and overrides whatever a submission sets.
-                model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| DEFAULT_OPENROUTER_MODEL.to_string()),
-            },
-        }
+        Self::from_provider_with(&provider, |name| std::env::var(name).ok())
     }
 }
 
@@ -625,7 +648,8 @@ impl Baseline {
     /// Builds the baseline from environment configuration:
     ///   - `DITTOBENCH_DB` (db path, default `./dittobench.db`)
     ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama`; the
-    ///     validator reserves `platform` for ticket-scoped scoring)
+    ///     validator reserves `platform` and the soft-deprecated `chutes`
+    ///     selector for ticket-scoped v7 and compatibility-relayed v6 scoring)
     ///   - `DITTOBENCH_MODEL` (model id)
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
@@ -702,6 +726,15 @@ impl Baseline {
                 // The trusted local broker authorizes the sandbox execution
                 // boundary, not this non-secret compatibility header value.
                 api_key: "ticket".to_string(),
+                model: model.clone(),
+            },
+            ModelProvider::LegacyV6Compat {
+                base_url,
+                api_key,
+                model,
+            } => ChatModelConfig::OpenAiCompat {
+                base_url: base_url.clone(),
+                api_key: api_key.clone(),
                 model: model.clone(),
             },
             ModelProvider::Ollama { base_url, model } => {
@@ -975,6 +1008,36 @@ mod preflight_tests {
     use axum::routing::post;
     use axum::{Json, Router};
     use std::sync::Mutex;
+
+    #[test]
+    fn injected_v6_chutes_selector_uses_only_the_legacy_compat_relay() {
+        let values = std::collections::HashMap::from([
+            (
+                "CHUTES_BASE_URL",
+                "http://host.docker.internal:11435/v1".to_string(),
+            ),
+            ("CHUTES_API_KEY", "relay-placeholder".to_string()),
+            ("DITTOBENCH_MODEL", "qwen/qwen3-32b".to_string()),
+        ]);
+
+        let provider =
+            ModelProvider::from_provider_with("chutes", |name| values.get(name).cloned());
+        match &provider {
+            ModelProvider::LegacyV6Compat {
+                base_url,
+                api_key,
+                model,
+            } => {
+                assert_eq!(base_url, "http://host.docker.internal:11435/v1");
+                assert_eq!(api_key, "relay-placeholder");
+                assert_eq!(model, "qwen/qwen3-32b");
+            }
+            other => panic!("expected legacy v6 compatibility relay, got {other:?}"),
+        }
+
+        // Constructing this adapter must not consult OPENROUTER_API_KEY.
+        Baseline::build_model(&provider).expect("build injected v6 relay model");
+    }
 
     #[test]
     fn grounded_decline_grammar_covers_natural_model_variants() {

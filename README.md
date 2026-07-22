@@ -203,7 +203,7 @@ below.
 
 - `evaluate` (local, fixed): scores your submission against the same inputs every run: the static seed user, the same bundled LongMemEval questions, and a fixed-seed tool set. Inputs are reproducible and model output is still stochastic.
 - `practice` (local, rotating): re-rolls prompts per run, but from a small fixed template pool (10 memory facts). It varies wording, not substance, and never exercises the seeding tiers/waves.
-- Hosted validator: generates a fresh random dataset per submission, like the on-chain SN118 validator, and is the only pre-chain rehearsal of Tier B/C seeding and the real question mix. Drive it from the playground's Submit tab (below). A v7 crate submission is built and run with locked `openai/gpt-oss-20b` inference supplied by the platform; a `harness_url` submission uses that harness's local model configuration.
+- Hosted validator: generates a fresh random dataset per submission, like the on-chain SN118 validator, and is the only pre-chain rehearsal of Tier B/C seeding and the real question mix. Drive it from the playground's Submit tab (below). Until the platform publishes a ticketed v7 practice path, hosted submissions stay on the active legacy benchmark contract; a `harness_url` submission uses that harness's local model configuration.
 
 Use `evaluate` to develop.
 
@@ -216,7 +216,7 @@ The hosted validator is available. The playground's Submit tab drives it:
 2. Set `DITTOBENCH_HARNESS_URL` in `.env` to the public URL.
   [.env.example](.env.example) ships the official `DITTOBENCH_API_URL`.
 3. `cargo run -- playground` → open the Submit tab and pick a run size.
-  Canonical v7 crate runs use locked GPT-OSS-20B inference supplied through the
+  Canonical v7 scoring uses locked GPT-OSS-20B inference supplied through the
   platform's ticket-scoped route. The playground does not send a provider key.
   The local target continues to use only the model configuration of your
   already-running harness.

@@ -76,9 +76,10 @@ pub(super) async fn submit_start_handler(
         _ => "small".to_string(),
     };
     let url = format!("{}/v1/submit", state.submit.api_url.trim_end_matches('/'));
-    // Hosted v7 crate runs obtain ticket-scoped platform inference. The
-    // playground never forwards a provider credential. A local harness still
-    // uses only its own local model configuration.
+    // This public practice endpoint intentionally omits bench_version and
+    // remains on its active legacy contract. Canonical v7 requires a
+    // platform-issued ticket/session and is never inferred from UI copy or a
+    // repository default. The playground never forwards provider credentials.
     let body = if req.target == "crate" {
         json!({
             "git_url": state.submit.git_url,
