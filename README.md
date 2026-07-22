@@ -271,18 +271,34 @@ python3 scripts/submission-workbench.py
 ```
 
 It opens `http://127.0.0.1:4320`. Drop the reviewed submission tarball, choose
-OpenRouter, Chutes, or local Ollama, acknowledge local source execution, and
-click **Build, load & chat**. The Ditto Memory Passport ZIP is optional: omit it
+OpenRouter, Chutes, or local Ollama, then choose the exact provider model ID.
+The model field accepts arbitrary valid IDs and offers convenient OpenRouter
+presets including `moonshotai/kimi-k3` and `x-ai/grok-4.5`; consult the provider
+catalog for current context limits and availability. Acknowledge local source
+execution and click **Build, load & chat**. The Ditto Memory Passport ZIP is optional: omit it
 for a genuinely fresh blank-memory chat, or add it to experience the harness
 against real Ditto memories. The same page shows preparation, safe extraction,
 Cargo release build, harness health, and memory initialization progress before
 turning into a multi-turn chat. **Review another tarball** stops the current
 harness, removes its temporary files, and resets the page for the next
-submission.
+submission. Each answer shows its reported token counts and latency. A
+zero-token response is explicitly marked as a possible harness fallback so a
+provider error hidden behind a successful HTTP envelope is not mistaken for a
+working model response.
+
+After a session is ready, **Change inference** can restart the harness with a
+different provider, model ID, or rotated API key without rebuilding the source
+or calling `/seed` again. The existing database and isolated Passport namespace
+stay mounted. A supplied replacement key is held only in workbench memory and
+the child process environment; it is never written to disk or returned by the
+status API. If the replacement cannot start, the workbench attempts to restore
+the previous inference configuration against the same seeded database.
 
 OpenRouter and Chutes appear as available only when `OPENROUTER_API_KEY` or
 `CHUTES_API_KEY` is present in the workbench process. Only the selected
-provider's key is passed to the child. When a Passport is present, the default
+provider's key is passed to the child. The selected model is passed separately
+as `DITTOBENCH_MODEL`; credentials are never returned by the status API or
+embedded in the page. When a Passport is present, the default
 quick-chat mode verifies the entire signed export but seeds only the first 100
 seedable conversations so a reviewer can reach chat quickly; select **Full
 export** for compatibility and long-tail retrieval testing. Neither mode
