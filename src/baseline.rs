@@ -12,8 +12,8 @@
 //!
 //! ============================ EXTENSION POINTS ============================
 //! Miners improve their score by editing THIS file. On-chain scoring locks the
-//! model to `qwen/qwen3-32b` (Chutes `Qwen/Qwen3-32B-TEE`, served through a
-//! model-relay) and FORCES it, so the model is not a tuning lever on-chain. The
+//! model to `openai/gpt-oss-20b` through the platform inference relay and
+//! FORCES it, so the model is not a tuning lever on-chain. The
 //! real levers are retrieval quality, memory grounding, and tool-selection /
 //! argument accuracy:
 //!
@@ -35,8 +35,9 @@
 //!  * MODEL CHOICE — `Baseline::build_model`. Only affects LOCAL practice: swap
 //!    the model id, point at a local Ollama model (free, private), or a vLLM
 //!    endpoint. On-chain the validator overrides this with the locked
-//!    `qwen/qwen3-32b`, so it is not a scored lever; use it to rehearse against
+//!    `openai/gpt-oss-20b`, so it is not a scored lever; use it to rehearse against
 //!    the reference weights locally.
+//!
 //! =========================================================================
 
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -59,6 +60,338 @@ use ditto_harness::types::{
 use serde_json::{json, Value};
 
 use crate::protocol;
+
+/// Deterministically classify high-confidence grounded declines from model prose.
+///
+/// The wire-level `abstain` field is the canonical signal. This deliberately
+/// lives in the starter harness rather than the frozen validator grader. The
+/// grammar covers common possession, knowledge, recall, retrieval, disclosure,
+/// and record-absence constructions while rejecting responses that recover an
+/// answer later in the same message.
+fn inferred_abstain(final_text: &str) -> Option<bool> {
+    const GROUNDED_DECLINES: &[&str] = &[
+        // First-person possession / knowledge absence.
+        "i don't have",
+        "i do not have",
+        "i haven't got",
+        "i have not got",
+        "i have no record",
+        "i have no records",
+        "i have no information",
+        "i have no memory of",
+        "i have no memory for",
+        "i have no knowledge of",
+        "i have no knowledge about",
+        "i lack information about",
+        "i lack information on",
+        "i lack any record",
+        "i have nothing on file",
+        "i have nothing recorded",
+        "i don't have enough information",
+        "i do not have enough information",
+        "i don't have enough context",
+        "i do not have enough context",
+        "i have no recollection of",
+        "i don't know",
+        "i do not know",
+        // Recall / memory failure.
+        "i don't recall",
+        "i do not recall",
+        "i can't recall",
+        "i cannot recall",
+        "i couldn't recall",
+        "i could not recall",
+        "i don't remember",
+        "i do not remember",
+        "i can't remember",
+        "i cannot remember",
+        "i couldn't remember",
+        "i could not remember",
+        // Retrieval failure.
+        "i can't find",
+        "i cannot find",
+        "i couldn't find",
+        "i could not find",
+        "i was unable to find",
+        "i'm unable to find",
+        "i am unable to find",
+        "i can't locate",
+        "i cannot locate",
+        "i couldn't locate",
+        "i could not locate",
+        "i can't retrieve",
+        "i cannot retrieve",
+        "i couldn't retrieve",
+        "i could not retrieve",
+        "i don't see any mention",
+        "i do not see any mention",
+        "i don't see any record",
+        "i do not see any record",
+        "i don't see any information",
+        "i do not see any information",
+        "i can't determine from",
+        "i cannot determine from",
+        "i couldn't determine from",
+        "i could not determine from",
+        "i'm unable to determine from",
+        "i am unable to determine from",
+        "i can't verify from",
+        "i cannot verify from",
+        "i see no mention",
+        "i see no record",
+        "i see no information",
+        "i found no mention",
+        "i found no record",
+        "i found no information",
+        "i can't answer based on",
+        "i cannot answer based on",
+        "i'm unable to answer based on",
+        "i am unable to answer based on",
+        // Explicit awareness absence, scoped to conversation evidence.
+        "i'm not aware of any mention",
+        "i am not aware of any mention",
+        "i'm not aware of any record",
+        "i am not aware of any record",
+        "i'm not aware of any information",
+        "i am not aware of any information",
+        "i wasn't aware of any mention",
+        "i was not aware of any mention",
+        "i'm unaware of any mention",
+        "i am unaware of any mention",
+        "i'm unaware of any record",
+        "i am unaware of any record",
+        "i haven't been told",
+        "i have not been told",
+        "i wasn't told",
+        "i was not told",
+        "i wasn't given",
+        "i was not given",
+        // The user never disclosed the fact.
+        "you haven't told",
+        "you have not told",
+        "you never told",
+        "you didn't tell",
+        "you did not tell",
+        "you haven't shared",
+        "you have not shared",
+        "you never shared",
+        "you didn't share",
+        "you did not share",
+        "you haven't mentioned",
+        "you have not mentioned",
+        "you never mentioned",
+        "you didn't mention",
+        "you did not mention",
+        "you haven't provided",
+        "you have not provided",
+        "you never provided",
+        "you didn't provide",
+        "you did not provide",
+        "you haven't given",
+        "you have not given",
+        "you never gave",
+        "you didn't give",
+        "you did not give",
+        "you haven't stated",
+        "you have not stated",
+        "you never stated",
+        "you didn't state",
+        "you did not state",
+        "you haven't specified",
+        "you have not specified",
+        "you never specified",
+        "you didn't specify",
+        "you did not specify",
+        "you haven't indicated",
+        "you have not indicated",
+        "you never indicated",
+        "you didn't indicate",
+        "you did not indicate",
+        "you haven't disclosed",
+        "you have not disclosed",
+        "you never disclosed",
+        "you didn't disclose",
+        "you did not disclose",
+        "you haven't said",
+        "you have not said",
+        "you never said",
+        "you didn't say",
+        "you did not say",
+        "we haven't discussed",
+        "we have not discussed",
+        "we never discussed",
+        // Impersonal record / conversation absence.
+        "there's no record",
+        "there is no record",
+        "there was no record",
+        "there are no records",
+        "there were no records",
+        "there's no information",
+        "there is no information",
+        "there was no information",
+        "there isn't enough information",
+        "there is not enough information",
+        "there wasn't enough information",
+        "there was not enough information",
+        "insufficient information in",
+        "no record of",
+        "no information about",
+        "no information on",
+        "no such information was provided",
+        "no such information was shared",
+        "no such information was mentioned",
+        "no such detail was provided",
+        "no such detail was shared",
+        "no such detail was mentioned",
+        "nothing in my memory",
+        "nothing in our conversation",
+        "nothing in the conversation",
+        "nothing in our chat",
+        "nothing in the chat",
+        "not in my memory",
+        "not in my records",
+        "not in our conversation",
+        "not in the conversation",
+        "not in our chat",
+        "not in the chat",
+        "not in the conversation history",
+        "not in our conversation history",
+        "not on record",
+        "that wasn't mentioned",
+        "that was not mentioned",
+        "that wasn't provided",
+        "that was not provided",
+        "that wasn't stated",
+        "that was not stated",
+        "it wasn't mentioned",
+        "it was not mentioned",
+        "it wasn't provided",
+        "it was not provided",
+        "it wasn't stated",
+        "it was not stated",
+        "our conversation doesn't contain",
+        "our conversation does not contain",
+        "the conversation doesn't contain",
+        "the conversation does not contain",
+        "our chat doesn't contain",
+        "our chat does not contain",
+        "the chat doesn't contain",
+        "the chat does not contain",
+        "the history doesn't include",
+        "the history does not include",
+        "this hasn't come up",
+        "this has not come up",
+        "that hasn't come up",
+        "that has not come up",
+        "it hasn't been mentioned",
+        "it has not been mentioned",
+        "that hasn't been mentioned",
+        "that has not been mentioned",
+        "that hasn't been discussed",
+        "that has not been discussed",
+    ];
+    const ANSWER_RECOVERY: &[&str] = &[
+        "but",
+        "however",
+        "actually",
+        "yet",
+        "nevertheless",
+        "nonetheless",
+        "although",
+        "though",
+        "except",
+        "turns out",
+        "i found",
+        "i located",
+        "i retrieved",
+        "i remember now",
+        "now i remember",
+        "i do remember",
+        "i can confirm",
+        "i can tell you",
+        "the answer is",
+        "the value is",
+        "value is",
+        "answer is",
+        "stored value is",
+        "record shows",
+        "record says",
+        "history shows",
+    ];
+    const NON_GROUNDED_REFUSAL: &[&str] = &[
+        "permission",
+        "authorization",
+        "authority",
+        "access",
+        "ability",
+        "capability",
+        "to disclose",
+        "to delete",
+        "to forget",
+        "to remove",
+        "to save",
+        "to store",
+    ];
+
+    let normalized = normalize_decline_text(final_text);
+    let padded = format!(" {normalized} ");
+    let matched = GROUNDED_DECLINES
+        .iter()
+        .filter_map(|phrase| {
+            let needle = format!(" {phrase} ");
+            padded.find(&needle).map(|start| (start, needle.len()))
+        })
+        .min_by_key(|(start, _)| *start);
+    let (start, length) = matched?;
+    let tail = &padded[start + length..];
+    let non_grounded_refusal = NON_GROUNDED_REFUSAL
+        .iter()
+        .any(|phrase| contains_decline_phrase(tail, phrase));
+    let recovered = ANSWER_RECOVERY
+        .iter()
+        .any(|phrase| contains_decline_phrase(tail, phrase))
+        || contains_subject_copula(tail, "your")
+        || contains_subject_copula(tail, "it")
+        || contains_decline_phrase(tail, "i have");
+
+    (!non_grounded_refusal && !recovered).then_some(true)
+}
+
+fn typed_abstain_for_bench(bench_version: Option<u32>, final_text: &str) -> Option<bool> {
+    (bench_version.unwrap_or_default() >= 7)
+        .then(|| inferred_abstain(final_text))
+        .flatten()
+}
+
+fn normalize_decline_text(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\u{2018}' | '\u{2019}' | '\u{02bc}' => normalized.push('\''),
+            c if c.is_alphanumeric() || c == '\'' => {
+                normalized.extend(c.to_lowercase());
+            }
+            _ => normalized.push(' '),
+        }
+    }
+    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn contains_decline_phrase(text: &str, phrase: &str) -> bool {
+    let padded = format!(" {text} ");
+    padded.contains(&format!(" {phrase} "))
+}
+
+fn contains_subject_copula(text: &str, subject: &str) -> bool {
+    let words = text.split_whitespace().collect::<Vec<_>>();
+    words.iter().enumerate().any(|(index, word)| {
+        *word == subject
+            && (index == 0 || !matches!(words[index - 1], "what" | "which" | "whether"))
+            && words[index + 1..words.len().min(index + 7)]
+                .iter()
+                .any(|candidate| matches!(*candidate, "is" | "was" | "are" | "were"))
+    })
+}
 
 /// Shared per-case context for executing catalog tools through the validator's
 /// mock tool endpoint (observed execution). One is built per `/run` when
@@ -204,10 +537,8 @@ impl Tool for WireTool {
 
 /// Default local DB path (overridable via `DITTOBENCH_DB`).
 pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
-/// Chutes OpenAI-compatible inference endpoint.
-pub const CHUTES_BASE_URL: &str = "https://llm.chutes.ai/v1";
-/// Default Chutes model from the public Chutes catalog.
-pub const DEFAULT_CHUTES_MODEL: &str = "deepseek-ai/DeepSeek-V3.2-TEE";
+/// The benchmark v7 scored model and local OpenRouter default.
+pub const DEFAULT_OPENROUTER_MODEL: &str = "openai/gpt-oss-20b";
 /// Fixed user id for the single-tenant miner DB.
 pub const USER_ID: &str = "miner";
 
@@ -227,12 +558,8 @@ pub const MEMORY_TOOL_NAMES: &[&str] = &[
 pub enum ModelProvider {
     /// OpenRouter; reads `OPENROUTER_API_KEY` from the environment.
     OpenRouter { model: String },
-    /// Chutes OpenAI-compatible hosted inference.
-    Chutes {
-        base_url: String,
-        api_key: Option<String>,
-        model: String,
-    },
+    /// Ticket-scoped platform relay used by canonical benchmark v7 runs.
+    Platform { base_url: String, model: String },
     /// Local Ollama server.
     Ollama { base_url: String, model: String },
 }
@@ -242,7 +569,7 @@ impl ModelProvider {
     pub fn model_id(&self) -> &str {
         match self {
             ModelProvider::OpenRouter { model } => model,
-            ModelProvider::Chutes { model, .. } => model,
+            ModelProvider::Platform { model, .. } => model,
             ModelProvider::Ollama { model, .. } => model,
         }
     }
@@ -255,29 +582,25 @@ impl ModelProvider {
             .unwrap_or_else(|_| "openrouter".to_string())
             .to_lowercase();
         match provider.as_str() {
+            "platform" => ModelProvider::Platform {
+                base_url: std::env::var("DITTOBENCH_INFERENCE_BASE_URL")
+                    .expect("DITTOBENCH_INFERENCE_BASE_URL is required for platform inference"),
+                model: std::env::var("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|_| DEFAULT_OPENROUTER_MODEL.to_string()),
+            },
             "ollama" => ModelProvider::Ollama {
                 base_url: std::env::var("OLLAMA_BASE_URL")
                     .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string()),
                 model: std::env::var("DITTOBENCH_MODEL")
                     .unwrap_or_else(|_| "qwen2.5:7b".to_string()),
             },
-            "chutes" => ModelProvider::Chutes {
-                base_url: std::env::var("CHUTES_BASE_URL")
-                    .unwrap_or_else(|_| CHUTES_BASE_URL.to_string()),
-                api_key: std::env::var("CHUTES_API_KEY")
-                    .or_else(|_| std::env::var("OPENAI_API_KEY"))
-                    .ok(),
-                model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| DEFAULT_CHUTES_MODEL.to_string()),
-            },
             _ => ModelProvider::OpenRouter {
                 // EXTENSION POINT: change this default model. It sets only LOCAL
                 // practice runs and defaults to the on-chain scored model.
-                // Scoring locks inference to Qwen3-32B in a TEE (Chutes
-                // Qwen/Qwen3-32B-TEE) and overrides whatever a submission sets
-                // here. (Some OpenRouter keys 404 "no endpoints" on anthropic/*.)
+                // Benchmark v7 scoring locks inference to GPT-OSS-20B through
+                // the platform relay and overrides whatever a submission sets.
                 model: std::env::var("DITTOBENCH_MODEL")
-                    .unwrap_or_else(|_| "qwen/qwen3-32b".to_string()),
+                    .unwrap_or_else(|_| DEFAULT_OPENROUTER_MODEL.to_string()),
             },
         }
     }
@@ -301,11 +624,10 @@ pub struct Baseline {
 impl Baseline {
     /// Builds the baseline from environment configuration:
     ///   - `DITTOBENCH_DB` (db path, default `./dittobench.db`)
-    ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama` | `chutes`)
+    ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama`; the
+    ///     validator reserves `platform` for ticket-scoped scoring)
     ///   - `DITTOBENCH_MODEL` (model id)
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
-    ///   - `CHUTES_API_KEY` or `OPENAI_API_KEY` (required for Chutes)
-    ///   - `CHUTES_BASE_URL` (optional Chutes-compatible base URL)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
     pub async fn from_env() -> anyhow::Result<Baseline> {
         let db_path =
@@ -375,20 +697,13 @@ impl Baseline {
                 )?;
                 ChatModelConfig::openrouter(api_key, model.clone())
             }
-            ModelProvider::Chutes {
-                base_url,
-                api_key,
-                model,
-            } => {
-                let api_key = api_key
-                    .clone()
-                    .context("CHUTES_API_KEY is not set; export it or set OPENAI_API_KEY")?;
-                ChatModelConfig::OpenAiCompat {
-                    base_url: base_url.clone(),
-                    api_key,
-                    model: model.clone(),
-                }
-            }
+            ModelProvider::Platform { base_url, model } => ChatModelConfig::OpenAiCompat {
+                base_url: base_url.clone(),
+                // The trusted local broker authorizes the sandbox execution
+                // boundary, not this non-secret compatibility header value.
+                api_key: "ticket".to_string(),
+                model: model.clone(),
+            },
             ModelProvider::Ollama { base_url, model } => {
                 ChatModelConfig::ollama(base_url.clone(), model.clone())
             }
@@ -396,7 +711,7 @@ impl Baseline {
         // Deterministic decoding: a frozen reference model must answer phrasing
         // twins identically (metamorphic gate) and be stable run-to-run. temp 0
         // removes sampling noise and a fixed seed gives run-to-run reproducibility
-        // on providers that honor it (OpenAI-compatible, OpenRouter, Chutes), so
+        // on providers that honor it (OpenRouter and local compatible servers), so
         // the noise floor collapses; `None` max_tokens keeps the provider default.
         config
             .build_with_params(ModelParams {
@@ -635,8 +950,10 @@ impl Baseline {
             output_tokens += c.usage.output_tokens;
         }
 
+        let final_text = result.result.text;
         Ok(protocol::RunResponse {
-            final_text: result.result.text,
+            abstain: typed_abstain_for_bench(req.bench_version, &final_text),
+            final_text,
             tool_calls,
             prompt_tokens,
             output_tokens,
@@ -646,7 +963,6 @@ impl Baseline {
             // memory). The validator grades the slot when present, prose
             // containment otherwise -- an explicit slot removes phrasing risk.
             answer: None,
-            abstain: None,
         })
     }
 }
@@ -659,6 +975,144 @@ mod preflight_tests {
     use axum::routing::post;
     use axum::{Json, Router};
     use std::sync::Mutex;
+
+    #[test]
+    fn grounded_decline_grammar_covers_natural_model_variants() {
+        for text in [
+            "It seems I couldn't find any information about that.",
+            "I could not find that in our previous conversation.",
+            "I'm not aware of any mention of that in our conversation.",
+            "I don’t have your blood type in memory.",
+            "I do not have a record of your blood type.",
+            "I haven't got that detail saved.",
+            "I have no information about your preferred airport.",
+            "I have no memory of you naming a preferred airport.",
+            "I have no knowledge about that preference.",
+            "I lack information about your preferred airport.",
+            "I lack any record of that preference.",
+            "I have nothing on file for your blood type.",
+            "I have nothing recorded about that preference.",
+            "I don't have enough information to answer that.",
+            "I do not have enough context to determine that.",
+            "I have no recollection of you sharing that preference.",
+            "I don't know your blood type.",
+            "I do not know which airport you prefer.",
+            "I don't recall you sharing that.",
+            "I cannot recall that detail.",
+            "I couldn’t recall any such preference.",
+            "I don't remember your blood type.",
+            "I cannot remember you mentioning it.",
+            "I could not remember that from our chat.",
+            "I can't find that detail in memory.",
+            "I was unable to find a saved preference.",
+            "I’m unable to find any previous mention.",
+            "I can't locate a record for that.",
+            "I could not locate it in our conversation.",
+            "I cannot retrieve that information.",
+            "I couldn't retrieve a saved answer.",
+            "I don't see any mention of that preference.",
+            "I do not see any record of your blood type.",
+            "I cannot determine from our conversation which airport you prefer.",
+            "I’m unable to determine from the chat what your blood type is.",
+            "I can't verify from my memory that you provided that detail.",
+            "I see no mention of a preferred airport.",
+            "I found no record of your blood type.",
+            "I cannot answer based on our conversation history.",
+            "I am not aware of any record of that.",
+            "I wasn't aware of any mention of it.",
+            "I’m unaware of any record of that preference.",
+            "I haven't been told your blood type.",
+            "I was not given a preferred airport.",
+            "You haven't told me your blood type.",
+            "You did not tell me which airport you prefer.",
+            "You never shared that preference with me.",
+            "You haven't mentioned a blood type.",
+            "You did not mention that in our chat.",
+            "You never provided that detail.",
+            "You haven't given me that information.",
+            "You never gave me a preferred airport.",
+            "You have not stated that preference.",
+            "You haven't specified a preferred airport.",
+            "You never indicated your blood type.",
+            "You did not disclose that detail.",
+            "You haven't said which airport you prefer.",
+            "We have not discussed your blood type.",
+            "There’s no record of your blood type here.",
+            "There are no records containing that preference.",
+            "There was no information about that in our conversation.",
+            "There isn't enough information in our chat to answer that.",
+            "Insufficient information in the conversation to determine that.",
+            "No record of that appears in memory.",
+            "No information on that preference is available.",
+            "No such information was provided in our conversation.",
+            "No such detail was mentioned in our chat.",
+            "Nothing in my memory identifies your preferred airport.",
+            "Nothing in our conversation states your blood type.",
+            "That detail is not in my memory.",
+            "It is not in our conversation history.",
+            "That preference is not on record.",
+            "That wasn't mentioned previously.",
+            "It was not provided in the chat.",
+            "That wasn’t stated anywhere in our conversation.",
+            "Our conversation doesn't contain that information.",
+            "The chat does not contain a preferred airport.",
+            "The history doesn't include your blood type.",
+            "This hasn't come up in our conversation.",
+            "That has not come up in our chat.",
+            "It hasn't been mentioned in the conversation.",
+            "That has not been discussed before.",
+            "  I   COULD   NOT   FIND   that detail.  ",
+        ] {
+            assert_eq!(inferred_abstain(text), Some(true), "{text}");
+        }
+    }
+
+    #[test]
+    fn grounded_decline_grammar_rejects_answers_and_recoveries() {
+        for text in [
+            "Your value is Lisbon.",
+            "I found your blood type: AB negative.",
+            "The record shows your preferred airport is DCA.",
+            "I am not aware of any issue with your saved preference.",
+            "I can't share private information.",
+            "I don't have permission to disclose your blood type.",
+            "You never told me to delete Lisbon from memory.",
+            "I couldn't find it at first, but your value is Lisbon.",
+            "I don't remember why; however, your value is Lisbon.",
+            "I had no record initially. Actually, the answer is Lisbon.",
+            "I could not locate it, yet I found the value: Lisbon.",
+            "I don't know why, though your blood type is AB negative.",
+            "I couldn't retrieve it. Turns out the value is Lisbon.",
+            "I didn't remember before; now I remember: Lisbon.",
+            "I had no information at first; I can confirm it is Lisbon.",
+            "I don't have Lisbon; I have Porto.",
+            "I couldn't find a mismatch. The record says Lisbon.",
+            "I don't see any issue. The stored value is Lisbon.",
+            "The conversation doesn't contain an error; the answer is Lisbon.",
+            "No record of deletion exists; your value is Lisbon.",
+            "You never specified that Lisbon was wrong; your value is Lisbon.",
+            "I don't recall an error. Your preferred airport is DCA.",
+            "I couldn't find it earlier. It is Lisbon.",
+        ] {
+            assert_eq!(inferred_abstain(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn typed_abstention_is_strictly_v7_plus() {
+        for text in [
+            "I couldn't find any information about that.",
+            "I'm not aware of any mention of that in our conversation.",
+        ] {
+            assert_eq!(typed_abstain_for_bench(None, text), None, "legacy: {text}");
+            assert_eq!(typed_abstain_for_bench(Some(6), text), None, "v6: {text}");
+            assert_eq!(
+                typed_abstain_for_bench(Some(7), text),
+                Some(true),
+                "v7: {text}"
+            );
+        }
+    }
 
     async fn capture_call(
         State(calls): State<Arc<Mutex<Vec<protocol::ToolExecRequest>>>>,

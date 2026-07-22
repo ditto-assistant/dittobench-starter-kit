@@ -188,10 +188,12 @@ pub async fn playground_turn(
 // HTTP server
 // ---------------------------------------------------------------------------
 
+type ChatHistory = HashMap<String, Vec<(String, String)>>;
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) baseline: Arc<Baseline>,
-    pub(crate) sessions: Arc<Mutex<HashMap<String, Vec<(String, String)>>>>,
+    pub(crate) sessions: Arc<Mutex<ChatHistory>>,
     pub(crate) score_jobs: Arc<Mutex<HashMap<String, ScoreJob>>>,
     pub(crate) http: reqwest::Client,
     pub(crate) submit: submit::SubmitConfig,

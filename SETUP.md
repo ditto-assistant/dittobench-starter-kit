@@ -39,9 +39,9 @@ cd dittobench-starter-kit
 
 cp .env.example .env
 #   edit .env, paste your key:   OPENROUTER_API_KEY=sk-or-v1-...
-#   (chat model defaults to qwen/qwen3-32b, the on-chain scored model;
-#    .env.example pins the same. Scoring locks to Qwen3-32B in a TEE and
-#    overrides this. Embeddings via Ollama.)
+#   (chat model defaults to openai/gpt-oss-20b, the benchmark v7 scored model;
+#    canonical scoring serves it through ticket-scoped platform inference.
+#    Embeddings use Ollama.)
 
 cargo run -- seed-user      # one-time: load the dummy LongMemEval seed user (embeds pairs + subjects; ~2 min)
 cargo run -- playground     # open http://127.0.0.1:8088 and chat
@@ -69,25 +69,20 @@ cargo run -- serve --port 8080   # expose GET /health, POST /run, POST /seed for
 
 ```ini
 OPENROUTER_API_KEY=sk-or-v1-...          # chat model key
-DITTOBENCH_PROVIDER=openrouter           # or `ollama` locally (free), or `chutes` hosted
-DITTOBENCH_MODEL=qwen/qwen3-32b          # the on-chain scored model; provider-specific id
+DITTOBENCH_PROVIDER=openrouter           # or `ollama` locally (free)
+DITTOBENCH_MODEL=openai/gpt-oss-20b      # benchmark v7 scored model
 OLLAMA_BASE_URL=http://localhost:11434   # embeddings (and ollama chat) endpoint
 DITTOBENCH_DB=./dittobench.db            # local Turso DB; keep the same path across seed-user + commands
 ```
 
 Fully local (no API key): set `DITTOBENCH_PROVIDER=ollama` and `DITTOBENCH_MODEL=qwen2.5:7b`.
 
-Chutes hosted inference: set `DITTOBENCH_PROVIDER=chutes`,
-`CHUTES_API_KEY=cpk_...`, and optionally `CHUTES_BASE_URL`; the default Chutes
-model is `deepseek-ai/DeepSeek-V3.2-TEE`. Set `DITTOBENCH_MODEL=Qwen/Qwen3-32B-TEE`
-to practice on the exact model the validator's relay serves when scoring.
-
 ---
 
-## 2. Scoring like the subnet: hosted BYOK practice
+## 2. Scoring like the subnet: hosted practice
 
 The hosted validator is available; the playground's Submit tab drives it
-against a fresh rotating dataset. Full steps: README, *Hosted BYOK practice*.
+against a fresh rotating dataset. Full steps: README, *Hosted practice*.
 
 ---
 

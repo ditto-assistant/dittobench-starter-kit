@@ -414,7 +414,7 @@ fn print_report(report: &protocol::ScoreReport, ds: &protocol::Dataset) {
 
     // Slowest cases.
     let mut slow: Vec<&protocol::CaseScore> = report.per_case.iter().collect();
-    slow.sort_by(|a, b| b.latency_ms.cmp(&a.latency_ms));
+    slow.sort_by_key(|case| std::cmp::Reverse(case.latency_ms));
     println!("\nslowest cases:");
     for cs in slow.iter().take(3) {
         println!(
@@ -462,9 +462,9 @@ fn submit() -> anyhow::Result<()> {
     println!("excluded (secrets + local state): {}", excludes.join(", "));
     println!();
     println!("next steps:");
-    println!("  * Hosted BYOK practice (off-chain): run `dittobench-miner playground` and use");
+    println!("  * Hosted practice (off-chain): run `dittobench-miner playground` and use");
     println!("    its Submit tab to score this harness against the hosted validator");
-    println!("    (see README \"Hosted BYOK practice\").");
+    println!("    (see README \"Hosted practice\").");
     println!("  * On-chain submission (SN118): register your miner hotkey, then upload the");
     println!("    tarball with the `ditto` miner CLI from the ditto-subnet repo — it pays the");
     println!("    eval fee on chain and uploads to the platform:");

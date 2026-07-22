@@ -3,3 +3,5 @@
 *.db-*
 *.tgz
 .env
+__pycache__/
+*.pyc

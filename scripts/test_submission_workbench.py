@@ -212,7 +212,6 @@ class SubmissionWorkbenchTest(unittest.TestCase):
             os.environ,
             {
                 "OPENROUTER_API_KEY": "openrouter-secret",
-                "CHUTES_API_KEY": "chutes-secret",
                 "UNRELATED_SECRET": "must-not-pass",
             },
             clear=False,
@@ -221,7 +220,6 @@ class SubmissionWorkbenchTest(unittest.TestCase):
                 "openrouter", Path(self.temporary.name) / "workbench.db"
             )
         self.assertEqual(env["OPENROUTER_API_KEY"], "openrouter-secret")
-        self.assertNotIn("CHUTES_API_KEY", env)
         self.assertNotIn("UNRELATED_SECRET", env)
         self.assertEqual(env["DITTOBENCH_PROVIDER"], "openrouter")
 
