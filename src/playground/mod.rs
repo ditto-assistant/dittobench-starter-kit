@@ -16,7 +16,7 @@
 //! canned results ([`tools`]) so the loop runs end to end.
 //!
 //! Modules: [`tools`] (fake action tools), [`prompt`] (the prod system prompt),
-//! [`submit`] (the hosted-validator BYOK submit proxy); the HTTP server and
+//! [`submit`] (the hosted-validator submit proxy); the HTTP server and
 //! the live local scoring glue live here.
 
 mod prompt;
@@ -214,6 +214,18 @@ struct ChatResp {
 }
 
 const INDEX_HTML: &str = include_str!("../playground.html");
+
+#[cfg(test)]
+mod hosted_practice_copy_tests {
+    use super::INDEX_HTML;
+
+    #[test]
+    fn hosted_practice_banner_does_not_claim_v7_before_ticketed_practice_exists() {
+        assert!(INDEX_HTML.contains("Hosted practice (active legacy benchmark)."));
+        assert!(INDEX_HTML.contains("does not request benchmark v7"));
+        assert!(!INDEX_HTML.contains("Hosted v7 practice"));
+    }
+}
 
 /// Runs the playground server.
 pub async fn serve(port: u16) -> anyhow::Result<()> {
