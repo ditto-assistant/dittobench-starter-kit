@@ -29,6 +29,10 @@ via the playground's Submit tab; see §2.
   ```
 - An OpenRouter API key, for the chat model (free local Ollama also works; see below).
 
+Hosted DittoBench v7 scoring supplies both chat and embeddings through the
+validator's ticket-bound gateway. These local Ollama and OpenRouter-key steps
+remain the practice setup; scored containers receive neither provider key.
+
 ---
 
 ## 1. Starter kit: talk to the agent
