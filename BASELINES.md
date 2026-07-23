@@ -5,6 +5,17 @@ is the target to beat: a competitive submission has to clear the composite below
 and the weakest categories are where the reference harness leaves the most on the
 table.
 
+## bench_version 8 embedding preparation (not activated)
+
+The proposed OpenRouter embedding profile can seed and query the unmodified
+starter kit, but the current fusion MLP was trained on `embeddinggemma` and is
+not ready to carry into a new embedding space. On the frozen 50-question
+retrieval fixture, `perplexity/pplx-embed-v1-0.6b` scored 0.940 hit@10 and 0.442
+recall@10 versus the committed 0.960/0.454 local reference. See
+[`docs/OPENROUTER-EMBEDDING-V8.md`](docs/OPENROUTER-EMBEDDING-V8.md) for the
+reproducible manifest, caveats, and pre-activation gates. This section does not
+change the activated benchmark or replace any released baseline.
+
 ## bench_version 6 (2026-07-21)
 
 - Harness: stock reference (this kit, unmodified `baseline.rs`).

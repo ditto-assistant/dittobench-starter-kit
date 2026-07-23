@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "condition": "starter-kit-openrouter-pplx-embed-v1-0.6b-768-v1",
+  "recorded_at": "2026-07-23T20:47:43Z",
+  "starter_revision": "bdf8b58800719a54484a7af223ee0523cdc2b5e1",
+  "starter_image_id": "sha256:765cf229279ee75c9a721232296ebdf45c9553d2a1b60ac00ddfef4ee1ebb7eb",
+  "fixture": {
+    "manifest_sha256": "7a549e0b553dfa62fe72381f3db2a760ded0aabb9cc47cb5161f05a55398a4e6",
+    "memory_cases_sha256": "21bd84ae345cecc2f2ae300564eb915be9c667c54b08680b3ae5a83fff45e966",
+    "pairs_sha256": "2cf8759d93b808666dc3228f3385b17a23726fe462fa6fa446f9ad5061c73c94",
+    "subject_links_sha256": "91b826124e7b93055afa3bc4f2317bcdc8326cdcaeb368267b76ca5b13befd22",
+    "subjects_sha256": "12881b1f26c348d9b9ceaadbddf1c477309b8390dae62b51c1fe4fe5b4cb6f36",
+    "questions": 50,
+    "pairs": 477,
+    "subjects": 1049,
+    "subject_links": 1710
+  },
+  "retrieval_stack": {
+    "k": 10,
+    "mlp_weights_sha256": "2cd9296d4e2e6ec8ac9d784fc64ab5b1db60fb14629005db0c509b9fcc36cbb9",
+    "mlp_training_embedding_model": "embeddinggemma",
+    "cross_encoder_sha256": "d9c3f25f235fca2140fb1c15e63786e82c7ec9935e4426db4674be9a14d585fb"
+  },
+  "embedding_profile": {
+    "revision": "longmemeval-openrouter-pplx-embed-v1-0.6b-768-v1",
+    "model": "perplexity/pplx-embed-v1-0.6b",
+    "provider": "Perplexity",
+    "dimensions": 768,
+    "provider_fallbacks": false,
+    "provider_data_collection": "deny"
+  },
+  "result": {
+    "hit_at_10": 0.94,
+    "recall_at_10": 0.442,
+    "by_question_type": {
+      "knowledge-update": { "n": 9, "hit_at_10": 0.778, "recall_at_10": 0.308 },
+      "multi-session": { "n": 9, "hit_at_10": 1.0, "recall_at_10": 0.378 },
+      "single-session-assistant": { "n": 8, "hit_at_10": 1.0, "recall_at_10": 0.923 },
+      "single-session-preference": { "n": 8, "hit_at_10": 0.875, "recall_at_10": 0.243 },
+      "single-session-user": { "n": 8, "hit_at_10": 1.0, "recall_at_10": 0.375 },
+      "temporal-reasoning": { "n": 8, "hit_at_10": 1.0, "recall_at_10": 0.447 }
+    }
+  },
+  "provider_telemetry": {
+    "requests": 1282,
+    "cache_hits": 77,
+    "cache_misses": 1205,
+    "upstream_requests": 1205,
+    "failures": 0,
+    "cache_write_failures": 0,
+    "prompt_tokens": 415389,
+    "provider_latency_ms": 85504,
+    "estimated_cost_usd": 0.001661556
+  },
+  "reference_comparison": {
+    "source": "fixtures/models/README.md",
+    "embedding_model": "embeddinggemma",
+    "hit_at_10": 0.96,
+    "recall_at_10": 0.454,
+    "hit_at_10_delta": -0.02,
+    "recall_at_10_delta": -0.012
+  },
+  "activation_status": "not_ready",
+  "activation_blocker": "The shipped fusion MLP was trained on embeddinggemma. Regenerate candidate signals and retrain it in the pinned OpenRouter embedding space before a v8 production cut."
+}
