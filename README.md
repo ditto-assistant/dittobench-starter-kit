@@ -490,6 +490,20 @@ On the bundled seed user this lifts retrieval from hit@10 0.90 → 0.96 vs the
 Vertex-trained weights. The cross-encoder rerank is embedder-independent (it
 scores raw text), so it is identical to production.
 
+DittoBench v7 keeps this exact 768-dimensional `OllamaEmbedder` interface, but
+the trusted validator gateway serves it with the reviewed OpenRouter profile
+`dittobench-v7-openrouter-pplx-embed-v1-0.6b-768-v1`
+(`perplexity/pplx-embed-v1-0.6b`, Perplexity only, no fallback). The harness
+does not receive an OpenRouter key and cannot select a sibling model or
+provider. Local practice and historical benchmark versions continue to use
+`embeddinggemma`.
+
+The existing MLP weights are intentionally unchanged for v7. A paired replay
+found the embedding swap operationally negligible, so rollout freezes the
+current MLP plus hosted embedding profile as one reviewed contract and
+recalibrates the 60-run v7 token manifest around that combination. A future
+model or dimension change requires a new profile and calibration.
+
 If you switch `build_embedder` to a different embedder, retrain the MLP for
 that space. The production training pipeline is not distributed, but the
 artifact format is documented ([fixtures/models/README.md](fixtures/models/README.md)
