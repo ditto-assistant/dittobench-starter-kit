@@ -25,7 +25,7 @@ via the playground's Submit tab; see §2.
 - Ollama, for memory embeddings (`embeddinggemma`, 768-dim):
   ```bash
   ollama serve &
-  ollama pull embeddinggemma          # needs Ollama >= 0.6
+  ollama pull embeddinggemma          # needs Ollama >= 0.11.10
   ```
 - An OpenRouter API key, for the chat model (free local Ollama also works; see below).
 
@@ -79,7 +79,21 @@ OLLAMA_BASE_URL=http://localhost:11434   # embeddings (and ollama chat) endpoint
 DITTOBENCH_DB=./dittobench.db            # local Turso DB; keep the same path across seed-user + commands
 ```
 
-Fully local (no API key): set `DITTOBENCH_PROVIDER=ollama` and `DITTOBENCH_MODEL=qwen2.5:7b`.
+Fully local development and practice (no API key):
+
+```bash
+cp .env.example .env
+# In .env, set DITTOBENCH_PROVIDER=ollama and DITTOBENCH_MODEL=gpt-oss:20b.
+ollama pull gpt-oss:20b
+ollama pull embeddinggemma
+cargo run -- ollama-check
+cargo run -- seed-user
+cargo run -- evaluate
+```
+
+This uses Ollama `gpt-oss:20b` for chat and `embeddinggemma` for 768-dimensional
+embeddings. Official scoring still injects the ticket-bound platform provider;
+Ollama is not a scored fallback.
 
 ---
 

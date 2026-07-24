@@ -7,6 +7,7 @@
 //!   mem-eval    — evaluate memory RETRIEVAL (recall@k) over the seed user; no LLM calls
 //!   evaluate    — score against a FIXED local benchmark (fixed-seed tools + bundled questions)
 //!   practice    — generate a ROTATING dataset, run it through the baseline, print a report
+//!   ollama-check — verify local GPT-OSS + embeddinggemma readiness
 //!   submit      — package the repo into a submission tarball (upload happens
 //!                 via the playground Submit tab / the ditto CLI — see `submit()`)
 
@@ -21,7 +22,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::{Parser, Subcommand};
 
-use dittobench_starter_kit::baseline::{Baseline, USER_ID};
+use dittobench_starter_kit::baseline::{
+    Baseline, DEFAULT_OLLAMA_CHAT_MODEL, DEFAULT_OLLAMA_EMBED_MODEL, USER_ID,
+};
 use dittobench_starter_kit::{datagen, eval, protocol, scorer};
 
 #[derive(Parser)]
@@ -93,6 +96,9 @@ enum Command {
         #[arg(long)]
         seed: Option<i64>,
     },
+    /// Verify that local Ollama has the exact chat and embedding models needed
+    /// for local development, including a 768-dimension embed call.
+    OllamaCheck,
     /// Package the repository into a submission tarball.
     Submit,
 }
@@ -109,8 +115,60 @@ async fn main() -> anyhow::Result<()> {
         Command::MemEval { k, limit } => mem_eval(k, limit).await,
         Command::Evaluate { tools, mem, seed } => evaluate(tools, mem, seed).await,
         Command::Practice { n, mem, seed } => practice(n, mem, seed).await,
+        Command::OllamaCheck => ollama_check().await,
         Command::Submit => submit(),
     }
+}
+
+async fn ollama_check() -> anyhow::Result<()> {
+    let base_url = std::env::var("OLLAMA_BASE_URL")
+        .unwrap_or_else(|_| ditto_harness::models::DEFAULT_OLLAMA_BASE_URL.to_string());
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    for model in [DEFAULT_OLLAMA_CHAT_MODEL, DEFAULT_OLLAMA_EMBED_MODEL] {
+        let response = client
+            .post(format!("{}/api/show", base_url.trim_end_matches('/')))
+            .json(&serde_json::json!({"model": model}))
+            .send()
+            .await
+            .with_context(|| format!("reach Ollama at {base_url}"))?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Ollama model {model} is not ready (HTTP {}); run `ollama pull {model}`",
+            response.status()
+        );
+    }
+
+    let response = client
+        .post(format!("{}/api/embed", base_url.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "model": DEFAULT_OLLAMA_EMBED_MODEL,
+            "input": "DittoBench Ollama readiness check"
+        }))
+        .send()
+        .await
+        .context("call Ollama embedding endpoint")?;
+    let status = response.status();
+    anyhow::ensure!(
+        status.is_success(),
+        "Ollama embedding check failed: HTTP {status}"
+    );
+    let payload: serde_json::Value = response.json().await.context("decode Ollama embedding")?;
+    let dimensions = payload["embeddings"][0]
+        .as_array()
+        .map(Vec::len)
+        .context("Ollama embedding response did not contain embeddings[0]")?;
+    anyhow::ensure!(
+        dimensions == 768,
+        "{DEFAULT_OLLAMA_EMBED_MODEL} returned {dimensions} dimensions; expected 768"
+    );
+
+    println!(
+        "Ollama ready: chat={DEFAULT_OLLAMA_CHAT_MODEL}, embeddings={DEFAULT_OLLAMA_EMBED_MODEL} (768 dimensions), endpoint={base_url}"
+    );
+    Ok(())
 }
 
 // --- serve ------------------------------------------------------------------

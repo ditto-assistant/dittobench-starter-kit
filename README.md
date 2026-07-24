@@ -153,9 +153,12 @@ when you build.
 export OPENROUTER_API_KEY=sk-or-...
 # (optional) export DITTOBENCH_MODEL=<any OpenRouter model id>
 
-#    ...or run fully local with Ollama:
-# export DITTOBENCH_PROVIDER=ollama
-# export DITTOBENCH_MODEL=qwen2.5:7b
+#    ...or run fully locally with Ollama (edit the same .env file):
+# DITTOBENCH_PROVIDER=ollama
+# DITTOBENCH_MODEL=gpt-oss:20b
+# ollama pull gpt-oss:20b
+# ollama pull embeddinggemma
+# cargo run -- ollama-check
 
 # 2. Embeddings use Ollama's embeddinggemma (768-dim) by default. For memory
 #    cases you need it running locally:
@@ -171,6 +174,11 @@ cargo run -- practice --n 20        # ROTATING random dataset (anti-overfit, lik
 # 4. Serve the harness for the validator.
 cargo run -- serve --port 8080
 ```
+
+Local Ollama uses the canonical `gpt-oss:20b` chat model and `embeddinggemma`
+embedder and requires no provider credential. Scored V7 runs continue to use
+the validator-injected, ticket-scoped platform inference and hosted embedding
+routes; Ollama is not a scored fallback.
 
 
 

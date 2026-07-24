@@ -539,6 +539,10 @@ impl Tool for WireTool {
 pub const DEFAULT_DB_PATH: &str = "./dittobench.db";
 /// The benchmark v7 scored model and local OpenRouter default.
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openai/gpt-oss-20b";
+/// Ollama's canonical local chat model tag.
+pub const DEFAULT_OLLAMA_CHAT_MODEL: &str = "gpt-oss:20b";
+/// Ollama's canonical 768-dimensional embedder tag.
+pub const DEFAULT_OLLAMA_EMBED_MODEL: &str = "embeddinggemma";
 /// Fixed user id for the single-tenant miner DB.
 pub const USER_ID: &str = "miner";
 
@@ -605,7 +609,8 @@ impl ModelProvider {
             "ollama" => ModelProvider::Ollama {
                 base_url: env("OLLAMA_BASE_URL")
                     .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string()),
-                model: env("DITTOBENCH_MODEL").unwrap_or_else(|| "qwen2.5:7b".to_string()),
+                model: env("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|| DEFAULT_OLLAMA_CHAT_MODEL.to_string()),
             },
             _ => ModelProvider::OpenRouter {
                 // EXTENSION POINT: change this default model. It sets only LOCAL
@@ -1008,6 +1013,24 @@ mod preflight_tests {
     use axum::routing::post;
     use axum::{Json, Router};
     use std::sync::Mutex;
+
+    #[test]
+    fn ollama_provider_defaults_to_gpt_oss() {
+        let values = std::collections::HashMap::from([(
+            "OLLAMA_BASE_URL",
+            "http://ollama.test:11434".to_string(),
+        )]);
+
+        let provider =
+            ModelProvider::from_provider_with("ollama", |name| values.get(name).cloned());
+        match provider {
+            ModelProvider::Ollama { base_url, model } => {
+                assert_eq!(base_url, "http://ollama.test:11434");
+                assert_eq!(model, DEFAULT_OLLAMA_CHAT_MODEL);
+            }
+            other => panic!("expected local Ollama provider, got {other:?}"),
+        }
+    }
 
     #[test]
     fn injected_v6_chutes_selector_uses_only_the_legacy_compat_relay() {

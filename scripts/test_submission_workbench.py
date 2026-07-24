@@ -223,6 +223,14 @@ class SubmissionWorkbenchTest(unittest.TestCase):
         self.assertNotIn("UNRELATED_SECRET", env)
         self.assertEqual(env["DITTOBENCH_PROVIDER"], "openrouter")
 
+    def test_ollama_provider_selects_local_models(self) -> None:
+        env = WORKBENCH._provider_environment(
+            "ollama", Path(self.temporary.name) / "workbench.db"
+        )
+        self.assertEqual(env["DITTOBENCH_PROVIDER"], "ollama")
+        self.assertEqual(env["DITTOBENCH_MODEL"], "gpt-oss:20b")
+        self.assertNotIn("OPENROUTER_API_KEY", env)
+
     def test_reset_clears_review_artifacts(self) -> None:
         old_session = self.state.session_dir
         old_session.mkdir(parents=True)
