@@ -109,7 +109,7 @@ The loop is: edit this kit, test locally, submit this kit. In order:
 4. Rehearse against the real validator (optional, recommended before you submit):
    serve your harness and drive it from the playground Submit tab. This is the
    only local run with a fresh random dataset per submission, and the only one
-   that exercises Tier B/C seeding. See Hosted BYOK (bring your own key) practice.
+   that exercises Tier B/C seeding. See Hosted practice.
 5. Package: `cargo run -- submit` builds `dittobench-submission.tgz` from your
    whole crate.
 6. Go on-chain: register a hotkey on netuid 118 and upload with the eval fee. The
@@ -146,19 +146,12 @@ when you build.
 > Ollama and `.env`.
 
 ```bash
-# 1. Pick a chat model for LOCAL practice. Default provider is OpenRouter,
-#    defaulting to qwen/qwen3-32b, the on-chain scored model (matches
-#    .env.example). On-chain scoring locks inference to Qwen3-32B served in a
-#    TEE (Trusted Execution Environment; Chutes Qwen/Qwen3-32B-TEE) and overrides
-#    your model, so the default already matches scoring conditions.
+# 1. Pick a chat model for LOCAL practice. Default provider is OpenRouter and
+#    the default model is openai/gpt-oss-20b, matching benchmark v7. Canonical
+#    scoring overrides local model settings and serves the same locked model
+#    through ticket-scoped platform inference.
 export OPENROUTER_API_KEY=sk-or-...
 # (optional) export DITTOBENCH_MODEL=<any OpenRouter model id>
-
-#    ...or use Chutes hosted OpenAI-compatible inference (set
-#    DITTOBENCH_MODEL=Qwen/Qwen3-32B-TEE to practice on the exact scored backend):
-# export DITTOBENCH_PROVIDER=chutes
-# export CHUTES_API_KEY=cpk_...
-# export DITTOBENCH_MODEL=Qwen/Qwen3-32B-TEE   # Chutes defaults to deepseek-ai/DeepSeek-V3.2-TEE; override to the scored model
 
 #    ...or run fully local with Ollama:
 # export DITTOBENCH_PROVIDER=ollama
@@ -185,7 +178,7 @@ cargo run -- serve --port 8080
 
 The interactive playground is a chat UI wired to a production-Ditto agent:
 the v2 system prompt + persona + tool-use policy, the model set by
-`DITTOBENCH_MODEL` (`.env.example` ships `qwen/qwen3-32b`, the scored model; set
+`DITTOBENCH_MODEL` (`.env.example` ships `openai/gpt-oss-20b`, the v7 scored model; set
 `google/gemini-3.1-flash-lite` to mirror prod Ditto's model), the full tool
 catalog, and real memory retrieval + cross-encoder rerank over the seed user. Action tools
 (search_web, create_image, agent jobs, settings, …) return fake-but-plausible
@@ -203,18 +196,18 @@ and after each turn a trace of the tool calls (args + fake results) and
 the memories retrieved for that query. Try *"search the web for…"*
 (`search_web` fires) or *"how many postcards have I collected?"* (memory
 retrieval answers with `ditto://memory/…` citations). The Submit tab scores
-your harness against the official hosted validator. See *Hosted BYOK practice*
+your harness against the official hosted validator. See *Hosted practice*
 below.
 
 ### Local practice vs. the hosted validator
 
 - `evaluate` (local, fixed): scores your submission against the same inputs every run: the static seed user, the same bundled LongMemEval questions, and a fixed-seed tool set. Inputs are reproducible and model output is still stochastic.
 - `practice` (local, rotating): re-rolls prompts per run, but from a small fixed template pool (10 memory facts). It varies wording, not substance, and never exercises the seeding tiers/waves.
-- Hosted validator: generates a fresh random dataset per submission, like the on-chain SN118 validator, and is the only pre-chain rehearsal of Tier B/C seeding and the real question mix. Drive it from the playground's Submit tab (below). Scoring runs under the locked model, so keep `DITTOBENCH_MODEL` at the kit default (`qwen/qwen3-32b`), which on-chain scoring serves in a TEE. A crate submission is built and run under the hard lock; a harness_url submission uses your harness's configured model, so leave the default in place.
+- Hosted validator: generates a fresh random dataset per submission, like the on-chain SN118 validator, and is the only pre-chain rehearsal of Tier B/C seeding and the real question mix. Drive it from the playground's Submit tab (below). Until the platform publishes a ticketed v7 practice path, hosted submissions stay on the active legacy benchmark contract; a `harness_url` submission uses that harness's local model configuration.
 
 Use `evaluate` to develop.
 
-### Hosted BYOK practice
+### Hosted practice
 
 The hosted validator is available. The playground's Submit tab drives it:
 
@@ -223,10 +216,10 @@ The hosted validator is available. The playground's Submit tab drives it:
 2. Set `DITTOBENCH_HARNESS_URL` in `.env` to the public URL.
   [.env.example](.env.example) ships the official `DITTOBENCH_API_URL`.
 3. `cargo run -- playground` → open the Submit tab and pick a run size.
-  Your harness calls the locked model (Qwen3-32B, the kit default) and your
-  `OPENROUTER_API_KEY` pays for that inference; BYOK means your key, not your
-  choice of model. The validator stores no keys. Leave `DITTOBENCH_MODEL` at the
-  default so practice matches scoring.
+  Canonical v7 scoring uses locked GPT-OSS-20B inference supplied through the
+  platform's ticket-scoped route. The playground does not send a provider key.
+  The local target continues to use only the model configuration of your
+  already-running harness.
 
 Two targets: local (your `serve` exposed publicly, as above) or crate
 (the validator builds your repo from a git URL, which must be publicly
@@ -271,7 +264,7 @@ python3 scripts/submission-workbench.py
 ```
 
 It opens `http://127.0.0.1:4320`. Drop the reviewed submission tarball, choose
-OpenRouter, Chutes, or local Ollama, acknowledge local source execution, and
+OpenRouter or local Ollama, acknowledge local source execution, and
 click **Build, load & chat**. The Ditto Memory Passport ZIP is optional: omit it
 for a genuinely fresh blank-memory chat, or add it to experience the harness
 against real Ditto memories. The same page shows preparation, safe extraction,
@@ -280,9 +273,9 @@ turning into a multi-turn chat. **Review another tarball** stops the current
 harness, removes its temporary files, and resets the page for the next
 submission.
 
-OpenRouter and Chutes appear as available only when `OPENROUTER_API_KEY` or
-`CHUTES_API_KEY` is present in the workbench process. Only the selected
-provider's key is passed to the child. When a Passport is present, the default
+OpenRouter appears as available only when `OPENROUTER_API_KEY` is present in
+the workbench process. Only the selected provider's key is passed to the child.
+When a Passport is present, the default
 quick-chat mode verifies the entire signed export but seeds only the first 100
 seedable conversations so a reviewer can reach chat quickly; select **Full
 export** for compatibility and long-tail retrieval testing. Neither mode
@@ -439,7 +432,7 @@ latency. Both are held out on purpose.
 
 Model. Every miner is scored on the same frozen model. A scored crate run builds
 your image and serves it under the lock: the validator's relay overrides
-`DITTOBENCH_MODEL` and serves Qwen3-32B in a TEE regardless of what `baseline.rs`
+`DITTOBENCH_MODEL` and serves GPT-OSS-20B through the platform inference relay regardless of what `baseline.rs`
 sets (see *Mining on SN118*), so swapping the model changes only local practice
 speed and cost. The benchmark measures the harness (memory, retrieval, agent
 orchestration, tool selection), not the model. If model choice were scored, the
@@ -447,9 +440,9 @@ board would rank who can afford the strongest frontier model, not who built the
 best agent, turning an open-source harness competition into a spend race. One
 frozen open-weight model holds that variable constant, so score gaps reflect
 harness quality and every miner is scored under identical, attestable conditions:
-the TEE proves the locked model actually ran, so no one can quietly swap in a
-stronger one. Keep the kit default (`qwen/qwen3-32b`, the same weights) so
-practice tracks scoring.
+the ticket-bound route proves the locked model actually ran, so no one can
+quietly swap in a stronger one. Keep the kit default
+(`openai/gpt-oss-20b`) so practice tracks scoring.
 
 Latency. Reported as `median_ms` on the leaderboard, never scored. It measures
 hardware and model-provider speed, not harness quality, and it varies with
@@ -546,7 +539,7 @@ cargo run -- submit   # packages dittobench-submission.tgz + prints next steps
 
 `submit` runs `tar -czf dittobench-submission.tgz .` (excluding `target/`,
 `.git`, `*.tgz`, `*.db`, `*.db-*`, `.env`, `.env.*`, and it prints the exclusion
-list). Never commit or package your `.env`. It holds your
+list). Never commit or package your `.env`. It may hold your local-practice
 `OPENROUTER_API_KEY`, and the tarball is uploaded to the platform. You submit
 the entire buildable project, with the `Dockerfile` at the tarball root:
 
@@ -591,9 +584,9 @@ produces a container serving that protocol on :8080.
 > Status: the hosted practice validator and the [SN118 leaderboard](https://platform-api.heyditto.ai/)
 > are live today. The on-chain submission path (`ditto upload`, eval fee, scoring,
 > weights) is not yet live, so no competitive scores populate the leaderboard yet.
-> The activated benchmark remains `bench_version` 2 until the announced v3
-> epoch activation. The scorer already serves both v2 and v3, and this kit is
-> compatible with either contract.
+> Benchmark v7 preserves the v6 question and scoring contract and changes the
+> locked inference model to `openai/gpt-oss-20b`. Activation remains governed
+> by the platform's announced epoch and validator-readiness gates.
 
 1. Registration. You need a hotkey registered on subnet netuid 118
 (`btcli subnet register --netuid 118`) and TAO for the registration cost plus
@@ -609,10 +602,10 @@ the effective rate limit.
 
 3. The runtime contract. Scoring is one-shot from your uploaded
 tarball. You do not keep a server running. The scorer builds your `Dockerfile` in a
-sandbox, starts your `serve` process, and injects env at runtime:
-`OPENROUTER_API_KEY` (the validator's key pays your harness's inference on
-on-chain runs, and your own key on hosted BYOK practice),
-`DITTOBENCH_PROVIDER`/`DITTOBENCH_MODEL`, and a fresh `DITTOBENCH_DB` path.
+sandbox, starts your `serve` process, and injects runtime model configuration
+for a trusted local broker plus a fresh `DITTOBENCH_DB` path. No validator or
+provider credential is placed in the harness container. The broker supplies
+only ticket-scoped v7 inference and locks `DITTOBENCH_MODEL` to GPT-OSS-20B.
 The Docker host gateway is mapped so the default `OLLAMA_BASE_URL` resolves to
 the scoring host's Ollama, which serves the reference `embeddinggemma`
 embedder. If you use a different local embedder, bundle it in your image. The

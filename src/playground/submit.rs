@@ -1,6 +1,5 @@
 //! Submit-to-dittobench-api proxy: the playground backend forwards submissions
-//! to the hosted validator (BYOK) so the browser never has to (avoids CORS)
-//! and attaches the miner's OpenRouter key from the environment.
+//! to the hosted validator so the browser never has to (avoids CORS).
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -13,9 +12,9 @@ use super::AppState;
 
 /// Config for proxying submissions to dittobench-api (resolved from env at
 /// startup). The playground backend makes the outbound call so the browser
-/// never has to (avoids CORS), and attaches the BYOK OpenRouter key.
+/// never has to (avoids CORS).
 ///
-/// By default this targets the official hosted practice validator (BYOK) so
+/// By default this targets the official hosted practice validator so
 /// miners can score against a fresh anti-cheat dataset. Pointing
 /// `DITTOBENCH_API_URL` at a localhost api is internal dev only.
 #[derive(Clone)]
@@ -37,7 +36,7 @@ impl SubmitConfig {
     pub(super) fn from_env() -> Self {
         SubmitConfig {
             api_url: std::env::var("DITTOBENCH_API_URL").unwrap_or_else(|_| {
-                // Official hosted practice validator (BYOK). Override with
+                // Official hosted practice validator. Override with
                 // DITTOBENCH_API_URL=http://localhost:8000 for internal dev.
                 "https://dittobench-api-22790208601.us-central1.run.app".to_string()
             }),
@@ -77,15 +76,11 @@ pub(super) async fn submit_start_handler(
         _ => "small".to_string(),
     };
     let url = format!("{}/v1/submit", state.submit.api_url.trim_end_matches('/'));
-    // BYOK: forward the miner's OpenRouter key (from env). It NEVER affects the
-    // score: scoring runs under the locked model (Qwen3-32B, forced by the
-    // validator), generation is non-LLM, and grading is judge-free. On the
-    // default `local` target the miner's own `serve` harness does its inference
-    // with its own env key, so this forwarded copy is unused there; it only
-    // funds inference on the legacy no-lock crate path. The key never touches
-    // the browser.
-    let key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-    let mut body = if req.target == "crate" {
+    // This public practice endpoint intentionally omits bench_version and
+    // remains on its active legacy contract. Canonical v7 requires a
+    // platform-issued ticket/session and is never inferred from UI copy or a
+    // repository default. The playground never forwards provider credentials.
+    let body = if req.target == "crate" {
         json!({
             "git_url": state.submit.git_url,
             "git_ref": state.submit.git_ref,
@@ -97,9 +92,6 @@ pub(super) async fn submit_start_handler(
             "run_size": run_size,
         })
     };
-    if !key.is_empty() {
-        body["openrouter_key"] = json!(key);
-    }
     match state.http.post(&url).json(&body).send().await {
         Ok(resp) => relay_json(resp).await,
         Err(err) => (

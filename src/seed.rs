@@ -90,8 +90,8 @@ pub struct SeedStats {
 /// Loads the bundled seed user into `store` under [`USER_ID`]. Each pair is
 /// saved (embedding `prompt\nresponse`) with its linked subjects (each embedded
 /// + linked) — the same `save_memory` path production uses to build the subject
-/// graph. Idempotent: upserts on `(user, pair_id)` and `(user, kg, subject_text)`,
-/// so re-running refreshes rather than duplicates.
+///   graph. Idempotent: upserts on `(user, pair_id)` and `(user, kg, subject_text)`,
+///   so re-running refreshes rather than duplicates.
 pub async fn load_seed_user(store: &Store) -> anyhow::Result<SeedStats> {
     let pairs: Vec<Pair> = serde_json::from_str(PAIRS_JSON)?;
     let subjects: Vec<Subject> = serde_json::from_str(SUBJECTS_JSON)?;

@@ -99,6 +99,10 @@ pub struct RunRequest {
     pub user_input: String,
     #[serde(default)]
     pub tools: Vec<ToolDefWire>,
+    /// Additive v7+ execution contract selector. Validators deliberately omit
+    /// it for v2-v6 so those historical harness requests stay byte-compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bench_version: Option<u32>,
     /// Optional (observed execution, `bench_version` 2 and 3): a validator-served mock
     /// tool-execution URL. When present, a harness should EXECUTE each non-memory
     /// catalog tool call by POSTing a [`ToolExecRequest`] here and using the
@@ -248,6 +252,7 @@ mod tests {
         // with an old validator that never sends them).
         assert!(!obj.contains_key("tool_endpoint"));
         assert!(!obj.contains_key("user_id"));
+        assert!(!obj.contains_key("bench_version"));
     }
 
     #[test]
@@ -258,6 +263,7 @@ mod tests {
             "system_prompt": "be helpful",
             "user_input": "figure on the Veltrix index?",
             "tools": [],
+            "bench_version": 7,
             "tool_endpoint": "http://host.docker.internal:49222/tool",
             "user_id": "colleague"
         }"#;
@@ -267,6 +273,7 @@ mod tests {
             Some("http://host.docker.internal:49222/tool")
         );
         assert_eq!(req.user_id.as_deref(), Some("colleague"));
+        assert_eq!(req.bench_version, Some(7));
     }
 
     #[test]

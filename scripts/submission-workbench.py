@@ -113,7 +113,6 @@ class WorkbenchState:
                 "provider": self.provider,
                 "providers": {
                     "openrouter": "OPENROUTER_API_KEY" in os.environ,
-                    "chutes": "CHUTES_API_KEY" in os.environ,
                     "ollama": True,
                 },
                 "memory_scope": self.memory_scope,
@@ -140,10 +139,9 @@ def _fail(state: WorkbenchState, category: str, detail: str, exc: Exception) -> 
 def _provider_environment(provider: str, database: Path) -> dict[str, str]:
     secret = {
         "openrouter": "OPENROUTER_API_KEY",
-        "chutes": "CHUTES_API_KEY",
         "ollama": None,
     }.get(provider)
-    if provider not in {"openrouter", "chutes", "ollama"}:
+    if provider not in {"openrouter", "ollama"}:
         raise LAB.LabError("unsupported provider")
     if secret and secret not in os.environ:
         raise LAB.LabError(f"{provider} is not available in this environment")
@@ -388,7 +386,7 @@ bindDrop('submission');bindDrop('passport');$('ack').onchange=()=>render(status)
 function add(role,text,trace=''){const d=document.createElement('div');d.className=`message ${role}`;d.textContent=text;if(trace){const t=document.createElement('div');t.className='trace';t.textContent=trace;d.appendChild(t)}$('messages').appendChild(d);$('messages').scrollTop=$('messages').scrollHeight}
 async function send(){const message=$('input').value.trim();if(!message)return;$('input').value='';add('user',message);$('send').disabled=true;$('chatStatus').textContent='Harness is thinking…';try{const x=await api('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message,history})});const trace=(x.tool_calls||[]).map(c=>`→ ${c.name} ${JSON.stringify(c.args||{})}`).join('\n');add('assistant',x.final_text||'(empty response)',trace);history.push({role:'user',content:message},{role:'assistant',content:x.final_text||''});if(history.length>maxHistory)history.splice(0,history.length-maxHistory)}catch(e){add('assistant',`Error: ${e.message}`)}finally{$('send').disabled=false;$('chatStatus').textContent='';$('input').focus()}}
 $('send').onclick=send;$('input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});$('reset').onclick=async()=>{if(!confirm('Stop this harness and clear its local review files?'))return;await api('/api/reset',{method:'POST'});history=[];$('messages').textContent='';$('setup').style.display='block';$('progress').classList.remove('show');$('chat').classList.remove('show');$('ack').checked=false};
-api('/api/status').then(x=>{const order=['openrouter','chutes','ollama'],pretty={openrouter:'OpenRouter',chutes:'Chutes',ollama:'Ollama local'},first=order.find(p=>x.providers[p]);$('providers').innerHTML=order.map(p=>`<label class="choice"><input type="radio" name="provider" value="${p}" ${p===first?'checked':''} ${x.providers[p]?'':'disabled'}><span>${pretty[p]}</span></label>`).join('');render(x);refresh()});
+api('/api/status').then(x=>{const order=['openrouter','ollama'],pretty={openrouter:'OpenRouter',ollama:'Ollama local'},first=order.find(p=>x.providers[p]);$('providers').innerHTML=order.map(p=>`<label class="choice"><input type="radio" name="provider" value="${p}" ${p===first?'checked':''} ${x.providers[p]?'':'disabled'}><span>${pretty[p]}</span></label>`).join('');render(x);refresh()});
 </script></body></html>"""
 
 
