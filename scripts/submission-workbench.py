@@ -148,6 +148,8 @@ def _provider_environment(provider: str, database: Path) -> dict[str, str]:
     env = LAB.child_environment([secret] if secret else [])
     env["DITTOBENCH_PROVIDER"] = provider
     env["DITTOBENCH_DB"] = str(database)
+    if provider == "ollama":
+        env["DITTOBENCH_MODEL"] = "gpt-oss:20b"
     return env
 
 
