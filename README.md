@@ -63,14 +63,21 @@ config), including the retrieval algorithm itself, which moves your score most.
 You rarely edit ditto-harness directly; see Changing the retrieval
 algorithm for how far the kit reaches and the one case that needs a fork.
 
-`src/baseline.rs` is the one file most changes start from. It wires the pieces
-together (database, embedder, model, retrieval, tools) and is marked with
-`EXTENSION POINT` comments where you plug in your work.
+`src/baseline.rs` is the natural entry point most changes start from. It wires
+the pieces together (database, embedder, model, retrieval, tools) and is marked
+with `EXTENSION POINT` comments where you plug in your work. It is a starting
+point, not a boundary: nothing restricts you to this one file. You can add your
+own modules, edit any other file, pull in new crate dependencies, and change the
+`Dockerfile`. The only hard requirement is that your crate still builds and
+serves the protocol (see *What you're free to change* and *The fixed interface*).
 
 ## What you optimize
 
 This is what miners optimize, and it is the only thing that moves your score. You
-make the harness remember and act better, all from `src/baseline.rs`:
+make the harness remember and act better. These levers are wired in
+`src/baseline.rs`, which is where most work starts, but you are not confined to
+that file: you can edit, add, or restructure any file in the crate and submit the
+whole thing (see *What you're free to change*). The three levers:
 
 1. Memory retrieval: from a user's history, find the exact past facts that answer
    a question. This is the harder half of the score.
@@ -251,6 +258,13 @@ input, available tools) and expects a `RunResponse` (final text, observed tool
 calls, token usage, latency). Before memory questions it installs a haystack via
 `POST /seed`. Full shapes in [PROTOCOL.md](PROTOCOL.md).
 
+The `system_prompt` field is an input, not a fixed prompt imposed on you. Your
+harness decides what actually reaches the model: keep it, extend it with your own
+tool-use and abstention policy, or replace it entirely. The prompt the agent runs
+on is yours to control, the same as the retrieval config and the tools. The stock
+baseline layers the production Ditto system prompt on top of this field; shaping
+that is one of the three levers below.
+
 ### Test a seed-capable submission with a Ditto memory export
 
 The local submission lab validates a signed Ditto Memory Passport, converts it
@@ -415,9 +429,10 @@ the highest-value change you can make.
 
 ## How to optimize
 
-The three levers from What you optimize, in detail. Everything here lives in
-`src/baseline.rs`, marked `EXTENSION POINT`. The chat model is locked (see What
-isn't scored, and why), so the levers are retrieval, the prompt, and tools:
+The three levers from What you optimize, in detail. Each is wired in
+`src/baseline.rs`, marked `EXTENSION POINT`, and free to spill into your own
+modules. The chat model is locked (see What isn't scored, and why), so the levers
+are retrieval, the prompt, and tools:
 
 1. Retrieval / memory: the production stack is wired and active, including the
   weight-predictor MLP, composite V2, and the cross-encoder reranker
@@ -426,9 +441,10 @@ isn't scored, and why), so the levers are retrieval, the prompt, and tools:
    `reranker.rs`, or changing `candidate_pool_size`/`variant`/limits. Measure
    with `mem-eval` (`recall@k`). Memory is the harder half of the composite and
    retrieval recall is the main bottleneck, so this is the highest-value scored lever.
-2. System prompt: augment the per-case prompt with a tool-use policy and
-  abstention rules so the agent picks the right tool (and *no* tool when it
-   shouldn't).
+2. System prompt: you own the prompt the agent runs on. The `system_prompt` in
+   each `RunRequest` is an input you can extend or replace; layer on a tool-use
+   policy and abstention rules so the agent picks the right tool (and *no* tool
+   when it shouldn't).
 3. Tools: the baseline registers the per-case tool catalog as stub tools so
   the agent can *select* the right one (what the validator scores). Add real
    host `Tool` implementations (`WireTool` → your own) to execute tools.
@@ -644,14 +660,17 @@ memory cases + 60 tool cases, with 2 staged seeding waves, a substantial
 Tier-B raw-pairs share, and a handful of isolation cases across
 separate user graphs. Exact counts can change with `bench_version`.
 
-6. Economics (king-of-the-hill, winner-take-most). The
-champion receives ~90% of the miner emission, the next 4 ranked miners
-split the remaining ~10%, and everyone else earns nothing. A challenger
-dethrones the champion only by beating its composite by more than a 5%
-relative margin (plus a statistical uncertainty band when score error bars
-are available). Weights are recomputed
-from the public score ledger on every validator sweep. Being 2nd by 4% earns a
-tail share.
+6. Economics (king-of-the-hill). Competitive weight is distributed
+`65% / 14% / 10% / 7% / 4%` to the champion and the next four distinct miners;
+everyone else earns nothing. The competitive vector takes 100% of the available
+miner emission, so nothing is burned while eligible miners exist (with no
+eligible miners, 100% is burned). A challenger dethrones the incumbent only after
+clearing the greater of a fixed `0.007` composite-point hysteresis and the
+statistical error band. From `bench_version` 6 on, that band shrinks smoothly
+once the incumbent exceeds `0.60`, keeping the crown contestable as scores
+approach the ceiling; a near-miss is settled by re-scoring both agents on shared
+seeds rather than dataset luck. Weights are recomputed from the public score
+ledger on every validator sweep.
 
 7. bench_version. Only the platform's **activated** version drives rank and
 emissions. A version bump first re-scores a frozen top-five cohort in shadow;
