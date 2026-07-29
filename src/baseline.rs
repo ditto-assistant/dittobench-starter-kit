@@ -61,6 +61,12 @@ use serde_json::{json, Value};
 
 use crate::protocol;
 
+// This is a starter-harness safety boundary, not a benchmark scoring limit.
+// Outcome-driven agents may legitimately use more than fifteen tool calls;
+// parallel calls can also share one model turn. Miners remain free to tune or
+// remove this local turn bound, subject to the validator's case deadline.
+const DEFAULT_MAX_AGENT_TURNS: usize = 24;
+
 /// Deterministically classify high-confidence grounded declines from model prose.
 ///
 /// The wire-level `abstain` field is the canonical signal. This deliberately
@@ -900,9 +906,10 @@ impl Baseline {
                         long_term_limit: 24,
                         ..PrepareRequest::default()
                     },
-                    // One tool call per case is the scored unit; allow a few
-                    // turns so the model can read a tool result then answer.
-                    max_turns: 4,
+                    // Keep enough room for composed work, retries, and useful
+                    // exploration. Scoring is outcome-driven and does not cap
+                    // a correct trajectory at fifteen calls.
+                    max_turns: DEFAULT_MAX_AGENT_TURNS,
                     save_memory: false,
                     ..ChatRunRequest::default()
                 },

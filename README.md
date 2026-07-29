@@ -410,13 +410,13 @@ Important security boundaries:
 
 ### DittoBench versioned scoring
 
-One scorer binary serves the immutable v2 and v3 contracts. A validator chooses
-the version assigned by the platform; this kit's additive wire protocol handles
+One scorer binary serves benchmark versions 7 and 8. A validator chooses the
+version assigned by the platform; this kit's additive wire protocol handles
 both without any benchmark-specific probe handler. Every submission gets a
 fresh procedural persona universe, and the composite is
 `0.5 × tool + 0.5 × memory`. The wire contract lives in
-[PROTOCOL.md](PROTOCOL.md); the public scorer documents the exact
-[v2/v3 differences](https://github.com/ditto-assistant/dittobench-api/blob/main/docs/dittobench-v2-vs-v3.md).
+[PROTOCOL.md](PROTOCOL.md); the public scorer owns the versioned dataset and
+grading contract.
 [BASELINES.md](BASELINES.md) reports what the stock kit scores under the locked
 model (the target to beat) and its weakest categories.
 
@@ -448,6 +448,11 @@ are retrieval, the prompt, and tools:
 3. Tools: the baseline registers the per-case tool catalog as stub tools so
   the agent can *select* the right one (what the validator scores). Add real
    host `Tool` implementations (`WireTool` → your own) to execute tools.
+
+The stock harness allows 24 model turns so composed tasks can include retries,
+dependent calls, and useful exploration. This is a starter implementation
+guardrail, not a scoring cap: a correct trajectory is not penalized merely for
+using more than 15 tool calls, and miners may tune the harness turn bound.
 
 ### What isn't scored, and why
 

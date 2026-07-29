@@ -129,7 +129,9 @@ pub async fn playground_turn(
                     candidate_pool_size: 50,
                     ..PrepareRequest::default()
                 },
-                max_turns: 8,
+                // Match the scored starter's room for composed trajectories.
+                // This bounds the stock UI loop, not the benchmark score.
+                max_turns: 24,
                 save_memory: false,
                 ..ChatRunRequest::default()
             },
