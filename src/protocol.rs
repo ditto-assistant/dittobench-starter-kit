@@ -99,12 +99,11 @@ pub struct RunRequest {
     pub user_input: String,
     #[serde(default)]
     pub tools: Vec<ToolDefWire>,
-    /// Additive v7+ execution contract selector. Validators deliberately omit
-    /// it for v2-v6 so those historical harness requests stay byte-compatible.
+    /// Additive v7+ execution contract selector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bench_version: Option<u32>,
-    /// Optional (observed execution, `bench_version` 2 and 3): a validator-served mock
-    /// tool-execution URL. When present, a harness should EXECUTE each non-memory
+    /// Optional observed-execution URL served by the validator. When present,
+    /// a harness should EXECUTE each non-memory
     /// catalog tool call by POSTing a [`ToolExecRequest`] here and using the
     /// returned [`ToolExecResponse::result`], instead of stubbing it locally. The
     /// validator then observes the real trajectory (rather than trusting

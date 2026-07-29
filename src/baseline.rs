@@ -527,14 +527,6 @@ pub enum ModelProvider {
     OpenRouter { model: String },
     /// Ticket-scoped platform relay used by canonical benchmark v7 runs.
     Platform { base_url: String, model: String },
-    /// Soft-deprecated OpenAI-compatible adapter reserved for the injected v6
-    /// transition relay. It has no public-provider default and is removed once
-    /// the frozen v6 cohort drains.
-    LegacyV6Compat {
-        base_url: String,
-        api_key: String,
-        model: String,
-    },
     /// Local Ollama server.
     Ollama { base_url: String, model: String },
 }
@@ -545,7 +537,6 @@ impl ModelProvider {
         match self {
             ModelProvider::OpenRouter { model } => model,
             ModelProvider::Platform { model, .. } => model,
-            ModelProvider::LegacyV6Compat { model, .. } => model,
             ModelProvider::Ollama { model, .. } => model,
         }
     }
@@ -558,16 +549,15 @@ impl ModelProvider {
                 model: env("DITTOBENCH_MODEL")
                     .unwrap_or_else(|| DEFAULT_OPENROUTER_MODEL.to_string()),
             },
-            // The v6 scorer still injects this historical provider selector,
-            // but its URL points at the trusted local compatibility relay. Do
-            // not add a hosted Chutes default or expose it as a local option.
-            "chutes" => ModelProvider::LegacyV6Compat {
-                base_url: env("CHUTES_BASE_URL")
-                    .expect("CHUTES_BASE_URL is required for legacy v6 compatibility"),
-                api_key: env("CHUTES_API_KEY")
-                    .or_else(|| env("OPENAI_API_KEY"))
-                    .expect("CHUTES_API_KEY is required for legacy v6 compatibility"),
-                model: env("DITTOBENCH_MODEL").unwrap_or_else(|| "qwen/qwen3-32b".to_string()),
+            // Validators used this selector before the ticket broker gained its
+            // neutral name. Keep it as a URL-only alias while submitted v7
+            // harnesses drain; it does not select Chutes or read a provider key.
+            "chutes" => ModelProvider::Platform {
+                base_url: env("DITTOBENCH_INFERENCE_BASE_URL")
+                    .or_else(|| env("CHUTES_BASE_URL"))
+                    .expect("an injected ticket broker URL is required for platform inference"),
+                model: env("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|| DEFAULT_OPENROUTER_MODEL.to_string()),
             },
             "ollama" => ModelProvider::Ollama {
                 base_url: env("OLLAMA_BASE_URL")
@@ -616,8 +606,8 @@ impl Baseline {
     /// Builds the baseline from environment configuration:
     ///   - `DITTOBENCH_DB` (db path, default `./dittobench.db`)
     ///   - `DITTOBENCH_PROVIDER` (`openrouter` [default] | `ollama`; the
-    ///     validator reserves `platform` and the soft-deprecated `chutes`
-    ///     selector for ticket-scoped v7 and compatibility-relayed v6 scoring)
+    ///     validator reserves `platform` for ticket-scoped scoring and may use
+    ///     the deprecated `chutes` spelling for the same local broker)
     ///   - `DITTOBENCH_MODEL` (model id)
     ///   - `OPENROUTER_API_KEY` (required for OpenRouter)
     ///   - `OLLAMA_BASE_URL` (embedder + ollama chat base url)
@@ -694,15 +684,6 @@ impl Baseline {
                 // The trusted local broker authorizes the sandbox execution
                 // boundary, not this non-secret compatibility header value.
                 api_key: "ticket".to_string(),
-                model: model.clone(),
-            },
-            ModelProvider::LegacyV6Compat {
-                base_url,
-                api_key,
-                model,
-            } => ChatModelConfig::OpenAiCompat {
-                base_url: base_url.clone(),
-                api_key: api_key.clone(),
                 model: model.clone(),
             },
             ModelProvider::Ollama { base_url, model } => {
@@ -982,33 +963,27 @@ mod tests {
     }
 
     #[test]
-    fn injected_v6_chutes_selector_uses_only_the_legacy_compat_relay() {
+    fn deprecated_chutes_selector_is_only_a_platform_broker_alias() {
         let values = std::collections::HashMap::from([
             (
                 "CHUTES_BASE_URL",
                 "http://host.docker.internal:11435/v1".to_string(),
             ),
-            ("CHUTES_API_KEY", "relay-placeholder".to_string()),
-            ("DITTOBENCH_MODEL", "qwen/qwen3-32b".to_string()),
+            ("CHUTES_API_KEY", "must-not-be-read".to_string()),
+            ("DITTOBENCH_MODEL", DEFAULT_OPENROUTER_MODEL.to_string()),
         ]);
 
         let provider =
             ModelProvider::from_provider_with("chutes", |name| values.get(name).cloned());
         match &provider {
-            ModelProvider::LegacyV6Compat {
-                base_url,
-                api_key,
-                model,
-            } => {
+            ModelProvider::Platform { base_url, model } => {
                 assert_eq!(base_url, "http://host.docker.internal:11435/v1");
-                assert_eq!(api_key, "relay-placeholder");
-                assert_eq!(model, "qwen/qwen3-32b");
+                assert_eq!(model, DEFAULT_OPENROUTER_MODEL);
             }
-            other => panic!("expected legacy v6 compatibility relay, got {other:?}"),
+            other => panic!("expected platform broker alias, got {other:?}"),
         }
 
-        // Constructing this adapter must not consult OPENROUTER_API_KEY.
-        Baseline::build_model(&provider).expect("build injected v6 relay model");
+        Baseline::build_model(&provider).expect("build injected platform broker model");
     }
 
     #[test]
