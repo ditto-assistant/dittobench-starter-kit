@@ -406,49 +406,6 @@ struct ToolExecCtx {
     hop: AtomicI32,
 }
 
-/// Answer the validator's reachability probe without involving the model.
-/// A successful response from the advertised endpoint means the validator had
-/// an opportunity to record the call; an HTTP or transport failure must not be
-/// self-reported as observed execution.
-async fn answer_preflight(
-    client: &reqwest::Client,
-    req: &protocol::RunRequest,
-    user_id: &str,
-    started: Instant,
-) -> protocol::RunResponse {
-    let mut tool_calls = Vec::new();
-    if let Some(endpoint) = req.tool_endpoint.as_ref().filter(|e| !e.is_empty()) {
-        let args = json!({ "query": "preflight" });
-        let body = protocol::ToolExecRequest {
-            case_id: req.case_id.clone(),
-            user_id: user_id.to_string(),
-            name: "search_web".to_string(),
-            args: args.clone(),
-            hop: 0,
-        };
-        match client.post(endpoint).json(&body).send().await {
-            Ok(response) if response.status().is_success() => {
-                tool_calls.push(protocol::ObservedToolCall {
-                    name: "search_web".to_string(),
-                    args,
-                    hop: 0,
-                });
-            }
-            Ok(response) => eprintln!(
-                "preflight tool_endpoint returned unsuccessful status: {}",
-                response.status()
-            ),
-            Err(err) => eprintln!("preflight probe could not reach tool_endpoint: {err}"),
-        }
-    }
-    protocol::RunResponse {
-        final_text: "ok".to_string(),
-        tool_calls,
-        latency_ms: started.elapsed().as_millis() as i64,
-        ..Default::default()
-    }
-}
-
 /// A catalog tool built from a wire tool definition. It exposes the case's
 /// catalog tool to the model — so the agent can *select* it, which is what the
 /// validator scores. When a [`ToolExecCtx`] is attached (observed execution), `execute()`
@@ -878,16 +835,6 @@ impl Baseline {
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| USER_ID.to_string());
 
-        // Reachability preflight (bench_version 3, PROTOCOL.md): a case whose
-        // id carries the reserved `preflight:` prefix is the validator's probe
-        // turn. The protocol REQUIRES one call to a served tool through
-        // `tool_endpoint` before responding — mechanically, not via the model.
-        // A scored run whose probe is never observed FAILS (and is retried),
-        // so do not remove this when forking the kit.
-        if req.case_id.starts_with("preflight:") {
-            return Ok(answer_preflight(&self.http, &req, &user_id, started).await);
-        }
-
         // Observed execution: when the validator advertises a mock tool endpoint, execute
         // catalog tools through it (so the validator observes the trajectory and
         // the model can use returned content). One shared context per case.
@@ -1006,13 +953,8 @@ impl Baseline {
 }
 
 #[cfg(test)]
-mod preflight_tests {
+mod tests {
     use super::*;
-    use axum::extract::State;
-    use axum::http::StatusCode;
-    use axum::routing::post;
-    use axum::{Json, Router};
-    use std::sync::Mutex;
 
     #[test]
     fn ollama_provider_defaults_to_gpt_oss() {
@@ -1197,83 +1139,11 @@ mod preflight_tests {
                 Some(true),
                 "v7: {text}"
             );
+            assert_eq!(
+                typed_abstain_for_bench(Some(8), text),
+                Some(true),
+                "v8: {text}"
+            );
         }
-    }
-
-    async fn capture_call(
-        State(calls): State<Arc<Mutex<Vec<protocol::ToolExecRequest>>>>,
-        Json(call): Json<protocol::ToolExecRequest>,
-    ) -> Json<protocol::ToolExecResponse> {
-        calls.lock().expect("lock calls").push(call);
-        Json(protocol::ToolExecResponse {
-            result: "ok".to_string(),
-            ..Default::default()
-        })
-    }
-
-    async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind test server");
-        let address = listener.local_addr().expect("test server address");
-        let task = tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("serve test endpoint");
-        });
-        (format!("http://{address}/tool"), task)
-    }
-
-    #[tokio::test]
-    async fn preflight_posts_the_required_observed_call() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let app = Router::new()
-            .route("/tool", post(capture_call))
-            .with_state(Arc::clone(&calls));
-        let (endpoint, task) = serve(app).await;
-        let request = protocol::RunRequest {
-            case_id: "preflight:run-123".to_string(),
-            tool_endpoint: Some(endpoint),
-            ..Default::default()
-        };
-
-        let response = answer_preflight(
-            &reqwest::Client::new(),
-            &request,
-            "scored-user",
-            Instant::now(),
-        )
-        .await;
-        task.abort();
-
-        assert_eq!(response.final_text, "ok");
-        assert_eq!(response.tool_calls.len(), 1);
-        let calls = calls.lock().expect("lock calls");
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].case_id, "preflight:run-123");
-        assert_eq!(calls[0].user_id, "scored-user");
-        assert_eq!(calls[0].name, "search_web");
-        assert_eq!(calls[0].args, json!({ "query": "preflight" }));
-        assert_eq!(calls[0].hop, 0);
-    }
-
-    #[tokio::test]
-    async fn preflight_does_not_claim_a_rejected_call() {
-        let app = Router::new().route(
-            "/tool",
-            post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
-        );
-        let (endpoint, task) = serve(app).await;
-        let request = protocol::RunRequest {
-            case_id: "preflight:run-rejected".to_string(),
-            tool_endpoint: Some(endpoint),
-            ..Default::default()
-        };
-
-        let response =
-            answer_preflight(&reqwest::Client::new(), &request, USER_ID, Instant::now()).await;
-        task.abort();
-
-        assert!(response.tool_calls.is_empty());
     }
 }

@@ -12,9 +12,8 @@ Returns `200 {"status":"ok"}`.
 The validator POSTs one case at a time. Two optional fields
 (`tool_endpoint`, `user_id`) may be present for observed tool execution; see
 [Observed tool execution](#observed-tool-execution-additive-optional) below.
-The same additive wire shape serves both immutable benchmark contracts: a
-v3-ready harness remains compatible with v2 validators, while v3 validators
-add the reserved reachability preflight described below.
+The same additive wire shape serves benchmark versions 7 and 8. Version 8
+changes dataset difficulty, not the harness HTTP contract.
 
 Request body, `RunRequest`:
 ```json
@@ -119,22 +118,6 @@ answer incorporates the value the executed tool returned, reported per case as
 A harness that ignores `tool_endpoint` still scores, but self-reported tool
 calls on served categories are capped at 0.5 in practice — and score 0 on the
 on-chain scored path, where observed execution is mandatory.
-
-### Reachability preflight (bench_version 3, REQUIRED on the scored path)
-
-Before any case is scored, the validator sends one probe turn: an ordinary
-`POST /run` whose `case_id` starts with the reserved prefix `preflight:` and
-whose `tool_endpoint` is set. On seeing that prefix your harness MUST POST one
-`ToolExecRequest` for a served tool to `tool_endpoint` (`search_web` with any
-args is sufficient) before responding. Hard-code the check on the `case_id`
-prefix — do not route it through your model; the probe verifies network
-reachability, not reasoning. The turn itself is never scored.
-
-If the validator observes no call across its probe attempts, the scored run
-**fails and is retried** instead of being scored — this protects you from an
-endpoint that is unreachable through no fault of yours, but it also means a
-harness that skips the probe never finalizes a score. The kit implements it in
-`Baseline::preflight` (`src/baseline.rs`); keep that path intact when forking.
 
 ## Dataset shapes (local practice)
 

@@ -263,7 +263,7 @@ mod tests {
             "system_prompt": "be helpful",
             "user_input": "figure on the Veltrix index?",
             "tools": [],
-            "bench_version": 7,
+            "bench_version": 8,
             "tool_endpoint": "http://host.docker.internal:49222/tool",
             "user_id": "colleague"
         }"#;
@@ -273,7 +273,7 @@ mod tests {
             Some("http://host.docker.internal:49222/tool")
         );
         assert_eq!(req.user_id.as_deref(), Some("colleague"));
-        assert_eq!(req.bench_version, Some(7));
+        assert_eq!(req.bench_version, Some(8));
     }
 
     #[test]

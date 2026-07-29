@@ -412,7 +412,7 @@ Important security boundaries:
 
 One scorer binary serves the immutable v2 and v3 contracts. A validator chooses
 the version assigned by the platform; this kit's additive wire protocol handles
-both, including v3's required scored-run preflight. Every submission gets a
+both without any benchmark-specific probe handler. Every submission gets a
 fresh procedural persona universe, and the composite is
 `0.5 × tool + 0.5 × memory`. The wire contract lives in
 [PROTOCOL.md](PROTOCOL.md); the public scorer documents the exact
