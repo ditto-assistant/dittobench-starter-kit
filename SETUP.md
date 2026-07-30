@@ -1,7 +1,11 @@
-# Setup: the DittoBench starter kit
+# Setup: the Rust reference starter kit
 
 This guide covers setup from a fresh clone to talking to the agent and scoring your harness locally.
 You only work in the starter kit; it pulls the harness crate automatically.
+
+These Rust prerequisites apply only to this maintained reference
+implementation. DittoBench accepts any language through the same Docker and
+HTTP contract; see README, *The fixed interface*.
 
 | Repo | What it is | You need it for |
 | --- | --- | --- |
@@ -21,7 +25,7 @@ via the playground's Submit tab; see §2.
 
 ## 0. Prerequisites
 
-- Rust (latest stable; the harness needs >= 1.85). Install via [rustup](https://rustup.rs).
+- Rust (latest stable; this reference needs >= 1.85). Install via [rustup](https://rustup.rs).
 - Ollama, for memory embeddings (`embeddinggemma`, 768-dim):
   ```bash
   ollama serve &
