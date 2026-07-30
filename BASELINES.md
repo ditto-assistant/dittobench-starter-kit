@@ -5,6 +5,54 @@ is the target to beat: a competitive submission has to clear the composite below
 and the weakest categories are where the reference harness leaves the most on the
 table.
 
+## bench_version 8 (2026-07-30)
+
+- Harness: stock reference at `23d9e87039a66e08548ec95826e7201b90988c5a`.
+- Model: `openai/gpt-oss-20b` through the ticket-scoped platform inference route.
+- Embeddings: `perplexity/pplx-embed-v1-0.6b`, 768 dimensions, through the
+  ticket-scoped hosted embedding route.
+- Method: one exact end-to-end `run_size=full` qualification run, seed
+  `123456789`, through the frozen v8 scorer and dataset.
+- Dataset SHA-256:
+  `42af90780465924e17429127d40e661d38ac6fe8abfed6299cdc5a4504e23070`.
+- Contract: datagen `66104eb555446ca080284ab2acb518df7f8343f3`, API
+  `8b01382c7b07bd27638ea8524d52e90deb5e84f8`.
+
+| metric | value |
+| --- | ---: |
+| raw composite | 0.155221 |
+| tool mean | 0.281266 |
+| memory mean | 0.207071 |
+| composite standard error | 0.017527 |
+| conversational sanity | 1.000000 |
+| metamorphic consistency | 1.000000 |
+| tool efficiency | 0.847619 |
+| median case latency | 3,556 ms |
+
+The run completed all 282 scored cases in 875.002 seconds. Trusted platform
+accounting recorded 1,629 chat requests and 1,848 embedding requests, all 3,477
+requests complete with zero provider failures. Chat usage was 12,252,502 prompt
+tokens plus 440,718 completion tokens; hosted embeddings used 36,964 prompt
+tokens. Cleanup left zero agents, tickets, grants, or request rows from the
+isolated fixture. The public-safe machine-readable evidence is
+[`evidence/v8-starter-reference.json`](evidence/v8-starter-reference.json).
+
+This is a raw reference score, not a permanent adjusted score. V8's token
+efficiency adjustment is computed dynamically from authenticated live usage and
+the eligible comparison cohort, so its multiplier changes as the cohort changes.
+The old multi-run token-calibration campaigns are not part of the v8 scoring
+contract and must not be inferred from this single qualification run.
+
+## Where the stock v8 harness leaves room
+
+V8 deliberately moves the baseline away from simple single-call lookup. In this
+run the stock kit scored zero on the composed business workflow, memory update,
+theme discovery-and-setting, current-contact, current-trip, current-project-lead,
+project-outstanding, and longest-current-trip categories. Those are the clearest
+optimization targets: preserve real model and tool execution while improving
+planning, cross-session reconciliation, temporal joins, retrieval, and outcome
+completion.
+
 ## bench_version 6 (2026-07-21)
 
 - Harness: stock reference (this kit, unmodified `baseline.rs`).

@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "reference_kind": "single_full_qualification_run",
+  "measured_at": "2026-07-30T06:31:39.149898Z",
+  "run_id": "40f48dd9-cc46-4989-ba13-626e503a1225",
+  "source_report_sha256": "36bdb47e970a24f819507499f9a286f505776dabe82393f981bdf4d651a95bca",
+  "benchmark": {
+    "version": 8,
+    "run_size": "full",
+    "seed": 123456789,
+    "case_count": 282,
+    "dataset_sha256": "42af90780465924e17429127d40e661d38ac6fe8abfed6299cdc5a4504e23070"
+  },
+  "source": {
+    "starter_revision": "23d9e87039a66e08548ec95826e7201b90988c5a",
+    "datagen_revision": "66104eb555446ca080284ab2acb518df7f8343f3",
+    "api_revision": "8b01382c7b07bd27638ea8524d52e90deb5e84f8",
+    "platform_preview_revision": "95ad2d91eb4e92a6dcd7d99c0b1010b093d57876"
+  },
+  "inference": {
+    "chat_model": "openai/gpt-oss-20b",
+    "embedding_model": "perplexity/pplx-embed-v1-0.6b",
+    "embedding_dimensions": 768,
+    "route_provider": "openrouter",
+    "route_profile": "openrouter-route-a471cd87ae7df5b9-v1"
+  },
+  "score": {
+    "raw_composite": 0.155221,
+    "composite_standard_error": 0.017527,
+    "tool_mean": 0.28126605952380956,
+    "memory_mean": 0.20707070707070707,
+    "conversational_sanity": 1,
+    "metamorphic_consistency": 1,
+    "tool_efficiency": 0.8476190476190476,
+    "median_case_latency_ms": 3556
+  },
+  "accounting": {
+    "usage_complete": true,
+    "completed_requests": 3477,
+    "failed_requests": 0,
+    "chat_requests": 1629,
+    "embedding_requests": 1848,
+    "chat_prompt_tokens": 12252502,
+    "chat_completion_tokens": 440718,
+    "chat_total_tokens": 12693220,
+    "embedding_prompt_tokens": 36964
+  },
+  "execution": {
+    "wall_seconds": 875.002,
+    "fixture_residue": {
+      "agents": 0,
+      "tickets": 0,
+      "grants": 0,
+      "requests": 0,
+      "total": 0
+    }
+  },
+  "efficiency_policy": {
+    "fixed_adjusted_score": false,
+    "reason": "The v8 token-efficiency adjustment is computed dynamically from authenticated live usage and the eligible comparison cohort."
+  }
+}
