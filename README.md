@@ -1,10 +1,17 @@
-# DittoBench miner starter kit (Rust)
+# DittoBench miner starter kit
 
 An agent and memory harness for DittoBench, the benchmark on
 Bittensor subnet 118 (SN118). Miners run an agent that the validator probes
 with tool-calling and memory-recall cases. You earn by being more correct
 than other miners. Latency is reported but not scored. A case that exceeds
 its per-case timeout scores 0.
+
+This repository is the maintained **Rust reference implementation**, not a Rust
+requirement. Competition admission is language-neutral: submit any project that
+has a `Dockerfile` at the tarball root and serves the documented HTTP contract.
+Python, TypeScript/JavaScript, Go, Java, C/C++, or any other containerized
+implementation is equally valid. The screener builds the image once; validators
+load and run that exact content-addressed image.
 
 The kit is a working baseline plus the full local eval loop (tool calling +
 memory + speed) running locally against an embedded Turso (SQLite-family)
@@ -33,10 +40,11 @@ It also ships a self-contained seed user: a coherent slice of LongMemEval
 
 There are two repositories, and it helps to be exact about the split.
 
-- dittobench-starter-kit (this repo) is the crate you submit. You edit it, then
+- dittobench-starter-kit (this repo) is the Rust reference you can submit. You edit it, then
   run `cargo run -- submit` to package the whole crate as a tarball. The
-  validator builds that tarball and scores it. This kit is both the local test
-  rig and your submission.
+  screener builds that tarball and validators score the resulting exact image.
+  This kit is both a local test rig and an example submission. A different
+  language may implement the same container/HTTP contract without this crate.
 - ditto-harness is a dependency, not a copy inside this repo. It is Ditto's
   production memory and agent engine, pinned to one commit in `Cargo.toml`. Cargo
   downloads it when you build. No harness source is checked into this kit, so
@@ -68,8 +76,9 @@ the pieces together (database, embedder, model, retrieval, tools) and is marked
 with `EXTENSION POINT` comments where you plug in your work. It is a starting
 point, not a boundary: nothing restricts you to this one file. You can add your
 own modules, edit any other file, pull in new crate dependencies, and change the
-`Dockerfile`. The only hard requirement is that your crate still builds and
-serves the protocol (see *What you're free to change* and *The fixed interface*).
+`Dockerfile`. The only hard requirement is that `docker build .` succeeds and
+the resulting image serves the protocol (see *What you're free to change* and
+*The fixed interface*).
 
 ## What you optimize
 
@@ -120,7 +129,7 @@ The loop is: edit this kit, test locally, submit this kit. In order:
 5. Package: `cargo run -- submit` builds `dittobench-submission.tgz` from your
    whole crate.
 6. Go on-chain: register a hotkey on netuid 118 and upload with the eval fee. The
-   validator builds your crate in Docker and scores it under the model lock. See
+   screener builds your image and validators score it under the model lock. See
    Mining on SN118.
 
 You never leave this repo for any of it. ditto-harness is fetched automatically
@@ -236,9 +245,10 @@ The hosted validator is available. The playground's Submit tab drives it:
   The local target continues to use only the model configuration of your
   already-running harness.
 
-Two targets: local (your `serve` exposed publicly, as above) or crate
-(the validator builds your repo from a git URL, which must be publicly
-fetchable, and a private fork needs the `gh_token` path).
+The active submission target is the uploaded tarball. Hosted `harness_url`
+practice can drive any already-running implementation. Older local tooling may
+still expose a git-source build target, but production V7/V8 validators never
+build miner repositories and never provide a GitHub credential to a build.
 
 `seed-user` and `mem-eval` need only Ollama (`embeddinggemma`). No chat model
 or API key is required. `mem-eval` runs the full
@@ -290,7 +300,8 @@ OpenRouter or local Ollama, acknowledge local source execution, and
 click **Build, load & chat**. The Ditto Memory Passport ZIP is optional: omit it
 for a genuinely fresh blank-memory chat, or add it to experience the harness
 against real Ditto memories. The same page shows preparation, safe extraction,
-Cargo release build, harness health, and memory initialization progress before
+the Rust reference's Cargo release build, harness health, and memory
+initialization progress before
 turning into a multi-turn chat. **Review another tarball** stops the current
 harness, removes its temporary files, and resets the page for the next
 submission.
@@ -304,7 +315,10 @@ export** for compatibility and long-tail retrieval testing. Neither mode
 changes the original export. Without a Passport, the workbench sends an empty
 `/seed` wave to create a fresh isolated user namespace before enabling chat.
 
-The workbench binds to loopback, stores uploads in a private temporary
+The current browser workbench is a convenience for this Rust reference; other
+languages can use the lower-level lab with a custom start command or call the
+same `/health`, `/seed`, and `/run` endpoints directly. The workbench binds to
+loopback, stores uploads in a private temporary
 directory, displays the uploaded tarball's SHA-256, and never exposes memory
 contents or counts in its status API. It is still intentionally **not a code
 sandbox**: the acknowledged submission runs as your local account. Use a
@@ -567,8 +581,9 @@ internal signal math and candidate queries), which you can otherwise override or
 bypass with the seams above. To fork: point the `ditto-harness` `git` URL and
 `rev` in `Cargo.toml` at your fork. Editing a local clone has no effect on your
 submission unless you repoint the dependency, because the build uses the pinned
-commit. Your fork must be publicly fetchable for the validator to build it; a
-private fork needs the `gh_token` path shown in the `Dockerfile`.
+commit. Any dependency needed by the submission build must be public or
+vendored into the bounded artifact. Screeners deliberately provide no GitHub
+credential or other build secret to submission-controlled Dockerfiles.
 
 ## Submit
 
@@ -586,9 +601,13 @@ list). Never commit or package your `.env`. It may hold your local-practice
 `OPENROUTER_API_KEY`, and the tarball is uploaded to the platform. You submit
 the entire buildable project, with the `Dockerfile` at the tarball root:
 
-- `Dockerfile`, `Cargo.toml`, `Cargo.lock`
+- `Dockerfile`, `Cargo.toml`, `Cargo.lock` (this Rust reference)
 - `src/`, including your edited `baseline.rs` and the `dittobench-miner` server
 - `fixtures/`, the ONNX models + seed data your harness loads at runtime
+
+An alternate implementation instead packages its own normal project files—for
+example `Dockerfile` + `pyproject.toml`, `package.json`, `go.mod`, or any other
+build inputs. Cargo files and a `src/*.rs` layout are not part of admission.
 
 The tarball is capped at 20 MiB. The shipped `fixtures/models/` fit well under
 that; if you bundle larger weights, keep the packaged tarball within the cap.
@@ -599,8 +618,9 @@ of your crate. The Docker build fetches it.
 
 ### The fixed interface
 
-The validator builds your tarball in Docker, runs the resulting container,
-then scores it. A submission is only valid if it keeps this contract intact:
+The screener builds your tarball in a credential-free rootless Docker boundary.
+Validators load the exact verified image, run it, then score it. A submission is
+only valid if it keeps this contract intact:
 
 
 | Must hold                                                              | Why                                                                              |
@@ -644,8 +664,8 @@ CLI shows the quote before you confirm). The fee is
 the effective rate limit.
 
 3. The runtime contract. Scoring is one-shot from your uploaded
-tarball. You do not keep a server running. The scorer builds your `Dockerfile` in a
-sandbox, starts your `serve` process, and injects runtime model configuration
+tarball. You do not keep a server running. A screener builds your `Dockerfile`
+once; the scorer loads that exact image, starts it, and injects runtime model configuration
 for a trusted local broker plus a fresh `DITTOBENCH_DB` path. No validator or
 provider credential is placed in the harness container. The broker supplies
 only ticket-scoped v7 inference and locks `DITTOBENCH_MODEL` to GPT-OSS-20B.
@@ -724,10 +744,10 @@ run also publishes `audit_case_count` so you can see how many pairs the number
 rests on.
 
 10. Originality (duplicate detection). Before scoring, the platform compares
-your uploaded crate against every other miner's eligible submission across
+your uploaded harness against every other miner's eligible submission across
 several dimensions: exact bytes, normalized source (comments, whitespace, and
 formatting stripped, so a reformat/recomment/file-rename does not hide a copy),
-lexical and AST-structural fingerprints, the prompt/strategy text, and a
+lexical and language-aware structural fingerprints, the prompt/strategy text, and a
 semantic code-embedding vector. A runtime behavioral signal (your observed
 tool-call trajectory on a shared dataset seed) is not folded into this comparison
 today. An exact or trivially repackaged copy of another miner's agent is held
