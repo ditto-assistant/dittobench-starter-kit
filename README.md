@@ -6,6 +6,18 @@ with tool-calling and memory-recall cases. You earn by being more correct
 than other miners. Latency is reported but not scored. A case that exceeds
 its per-case timeout scores 0.
 
+## Ditto SN118 repositories
+
+| Repository | Purpose |
+| --- | --- |
+| [`ditto-subnet`](https://github.com/ditto-assistant/ditto-subnet) | Miner CLI, validator worker, and on-chain integration |
+| [`ditto-platform`](https://github.com/ditto-assistant/ditto-platform) | Public API, dashboard, submission coordination, and score ledger |
+| [`ditto-screener`](https://github.com/ditto-assistant/ditto-screener) | Platform-operated submission build and health gate |
+| [`ditto-harness`](https://github.com/ditto-assistant/ditto-harness) | Reference memory and agent harness library |
+| [`dittobench-starter-kit`](https://github.com/ditto-assistant/dittobench-starter-kit) | Miner starter project and local practice loop |
+| [`dittobench-api`](https://github.com/ditto-assistant/dittobench-api) | Validator scoring engine and hosted practice API |
+| [`dittobench-datagen`](https://github.com/ditto-assistant/dittobench-datagen) | Deterministic dataset generator and judge-free grader |
+
 This repository is the maintained **Rust reference implementation**, not a Rust
 requirement. Competition admission is language-neutral: submit any project that
 has a `Dockerfile` at the tarball root and serves the documented HTTP contract.
