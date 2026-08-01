@@ -644,9 +644,9 @@ produces a container serving that protocol on :8080.
 
 ## Mining on SN118
 
-> Status: the hosted practice validator and the [SN118 leaderboard](https://platform-api.heyditto.ai/)
-> are live today. The on-chain submission path (`ditto upload`, eval fee, scoring,
-> weights) is not yet live, so no competitive scores populate the leaderboard yet.
+> Status: the hosted practice validator, on-chain submission path (`ditto upload`,
+> eval fee, scoring, weights), and the [SN118 leaderboard](https://platform-api.heyditto.ai/)
+> are live today.
 > Benchmark v7 preserves the v6 question and scoring contract and changes the
 > locked inference model to `openai/gpt-oss-20b`. Activation remains governed
 > by the platform's announced epoch and validator-readiness gates.
@@ -658,10 +658,16 @@ per-submission eval fees.
 2. Submission + fee. This kit's `submit` only packages the tarball. The
 on-chain upload happens through `ditto upload` (the miner CLI from the
 [ditto-subnet](https://github.com/ditto-assistant/ditto-subnet) repo), with
-your registered hotkey. Each upload pays a per-submission eval fee of roughly
-$5 USD, quoted in TAO at upload time (an oracle sets the exact amount, and the
-CLI shows the quote before you confirm). The fee is
-the effective rate limit.
+your registered hotkey. The Backroom-controlled fee is denominated in TAO and
+is currently `0.04 TAO` (`40,000,000 rao`). The CLI shows the exact TAO amount
+before you confirm. TAO/USD conversion is reporting-only and does not affect
+the fee, admission, or payment validation.
+
+The CLI saves a finalized payment receipt before upload so a failed upload can
+recover it for 24 hours without paying again. An abandoned unpaid reservation
+can be replaced after 15 minutes. Follow the
+[ditto-subnet miner guide](https://github.com/ditto-assistant/ditto-subnet/blob/main/docs/MINER.md#verify-and-submit)
+for the canonical upload, retry, and receipt-recovery commands.
 
 3. The runtime contract. Scoring is one-shot from your uploaded
 tarball. You do not keep a server running. A screener builds your `Dockerfile`
