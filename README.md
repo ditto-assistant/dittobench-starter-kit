@@ -1,5 +1,10 @@
 # DittoBench miner starter kit
 
+> **This project now lives in
+> [`ditto-subnet/miners/dittobench-starter-kit`](https://github.com/ditto-assistant/ditto-subnet/tree/main/miners/dittobench-starter-kit).**
+> This repository preserves the pre-migration history. Open new issues and pull
+> requests in `ditto-assistant/ditto-subnet`.
+
 An agent and memory harness for DittoBench, the benchmark on
 Bittensor subnet 118 (SN118). Miners run an agent that the validator probes
 with tool-calling and memory-recall cases. You earn by being more correct
