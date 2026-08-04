@@ -76,20 +76,21 @@ pub(super) async fn submit_start_handler(
         _ => "small".to_string(),
     };
     let url = format!("{}/v1/submit", state.submit.api_url.trim_end_matches('/'));
-    // This public practice endpoint intentionally omits bench_version and
-    // remains on its active legacy contract. Canonical v7 requires a
-    // platform-issued ticket/session and is never inferred from UI copy or a
-    // repository default. The playground never forwards provider credentials.
+    // Practice explicitly selects the active v8 dataset and scoring contract.
+    // The submitted harness still uses its own local model configuration; the
+    // canonical scored path supplies ticket-bound inference separately.
     let body = if req.target == "crate" {
         json!({
             "git_url": state.submit.git_url,
             "git_ref": state.submit.git_ref,
             "run_size": run_size,
+            "bench_version": crate::protocol::ACTIVE_BENCH_VERSION,
         })
     } else {
         json!({
             "harness_url": state.submit.harness_url,
             "run_size": run_size,
+            "bench_version": crate::protocol::ACTIVE_BENCH_VERSION,
         })
     };
     match state.http.post(&url).json(&body).send().await {
