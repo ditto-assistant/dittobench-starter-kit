@@ -705,6 +705,18 @@ impl ModelProvider {
                 model: env("DITTOBENCH_MODEL")
                     .unwrap_or_else(|| DEFAULT_OPENROUTER_MODEL.to_string()),
             },
+            // Canonical validators historically selected this generic
+            // OpenAI-compatible adapter name. Keep it as a URL-only alias of
+            // the ticket-scoped platform broker so old and current v8 images
+            // share one runtime contract. It does not select Chutes or read a
+            // provider credential.
+            "chutes" => ModelProvider::Platform {
+                base_url: env("DITTOBENCH_INFERENCE_BASE_URL")
+                    .or_else(|| env("CHUTES_BASE_URL"))
+                    .expect("an injected ticket broker URL is required for platform inference"),
+                model: env("DITTOBENCH_MODEL")
+                    .unwrap_or_else(|| DEFAULT_OPENROUTER_MODEL.to_string()),
+            },
             "ollama" => ModelProvider::Ollama {
                 base_url: env("OLLAMA_BASE_URL")
                     .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string()),
@@ -1112,6 +1124,30 @@ mod tests {
             }
             other => panic!("expected local Ollama provider, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn chutes_selector_is_only_a_platform_broker_alias() {
+        let values = std::collections::HashMap::from([
+            (
+                "CHUTES_BASE_URL",
+                "http://host.docker.internal:11436/v1/inference".to_string(),
+            ),
+            ("CHUTES_API_KEY", "must-not-be-read".to_string()),
+            ("DITTOBENCH_MODEL", DEFAULT_OPENROUTER_MODEL.to_string()),
+        ]);
+
+        let provider =
+            ModelProvider::from_provider_with("chutes", |name| values.get(name).cloned());
+        match &provider {
+            ModelProvider::Platform { base_url, model } => {
+                assert_eq!(base_url, "http://host.docker.internal:11436/v1/inference");
+                assert_eq!(model, DEFAULT_OPENROUTER_MODEL);
+            }
+            other => panic!("expected platform broker alias, got {other:?}"),
+        }
+
+        Baseline::build_model(&provider).expect("build injected platform broker model");
     }
 
     #[test]
